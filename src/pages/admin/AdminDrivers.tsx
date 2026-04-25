@@ -54,9 +54,10 @@ export const AdminDrivers = () => {
     national_id_number: '', password: '', vehicle_type: '', vehicle_plate: '',
   });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['drivers', offset],
     queryFn: () => driversApi.list({ limit: LIMIT, offset }),
+    refetchInterval: 30_000,
   });
 
   const createMutation = useMutation({
@@ -90,12 +91,32 @@ export const AdminDrivers = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-800">المناديبون</h2>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
-        >
-          + إضافة مندوب
-        </button>
+        <div className="flex items-center gap-2">
+          {dataUpdatedAt > 0 && (
+            <span className="text-xs text-gray-400 hidden sm:block">
+              آخر تحديث: {new Date(dataUpdatedAt).toLocaleTimeString('ar-EG')}
+            </span>
+          )}
+          <button
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['drivers'] })}
+            disabled={isFetching}
+            title="تحديث يدوي"
+            className={`flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-lg border transition-colors ${
+              isFetching
+                ? 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            <span className={isFetching ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
+            {isFetching ? 'جارٍ...' : 'تحديث'}
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+          >
+            + إضافة مندوب
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

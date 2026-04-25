@@ -9,43 +9,29 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/auth': {
+      '/api/auth': {
         target: 'https://delivry-backend.vercel.app',
         changeOrigin: true,
         secure: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
-      '/admin': {
+      '/api/admin': {
         target: 'https://delivry-backend.vercel.app',
         changeOrigin: true,
         secure: true,
-        // When the browser navigates to an /admin/* page (Accept: text/html),
-        // serve index.html so React Router handles it.
-        // API calls from Axios use Accept: application/json → proxied normally.
-        bypass(req) {
-          if (req.headers.accept?.includes('text/html')) {
-            return '/index.html';
-          }
-        },
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
-      '/driver': {
+      '/api/driver': {
         target: 'https://delivry-backend.vercel.app',
         changeOrigin: true,
         secure: true,
-        bypass(req) {
-          if (req.headers.accept?.includes('text/html')) {
-            return '/index.html';
-          }
-        },
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
-      '/drivers': {
+      '/api/drivers': {
         target: 'https://delivry-backend.vercel.app',
         changeOrigin: true,
         secure: true,
-      },
-      '/health': {
-        target: 'https://delivry-backend.vercel.app',
-        changeOrigin: true,
-        secure: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
   },

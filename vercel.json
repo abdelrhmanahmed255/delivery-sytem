@@ -1,9 +1,9 @@
 {
   "rewrites": [
-    { "source": "/auth/:path*", "destination": "https://delivry-backend.vercel.app/auth/:path*" },
-    { "source": "/admin/:path*", "destination": "https://delivry-backend.vercel.app/admin/:path*" },
-    { "source": "/drivers/:path*", "destination": "https://delivry-backend.vercel.app/drivers/:path*" },
-    { "source": "/driver/:path*", "destination": "https://delivry-backend.vercel.app/driver/:path*" },
+    { "source": "/api/auth/:path*", "destination": "https://delivry-backend.vercel.app/auth/:path*" },
+    { "source": "/api/admin/:path*", "destination": "https://delivry-backend.vercel.app/admin/:path*" },
+    { "source": "/api/drivers/:path*", "destination": "https://delivry-backend.vercel.app/drivers/:path*" },
+    { "source": "/api/driver/:path*", "destination": "https://delivry-backend.vercel.app/driver/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

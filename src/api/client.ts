@@ -1,10 +1,12 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 
-// Use empty baseURL so all requests go through the Vite proxy (fixes CORS in dev).
-// In production, set VITE_API_URL to your backend's base URL.
+// Use /api prefix so Vercel rewrites proxy to the backend without
+// colliding with frontend SPA routes (e.g. /admin/drivers).
+// In production this hits the Vercel rewrite rules.
+// In development, configure the Vite proxy to forward /api/* to the backend.
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },

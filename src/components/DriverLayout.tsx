@@ -1,5 +1,7 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { driversApi } from '../api/drivers';
+import { useDriverPresence } from '../utils/useDriverPresence';
 
 const NAV_TABS = [
   { label: 'العروض', path: '/driver/home', icon: '🔔' },
@@ -11,6 +13,18 @@ export const DriverLayout = () => {
   const logout = useAuthStore(state => state.logout);
   const location = useLocation();
 
+  // Manages presence/open, heartbeat, presence/close automatically
+  useDriverPresence();
+
+  const handleLogout = async () => {
+    try {
+      await driversApi.presenceClose();
+    } catch {
+      // best effort
+    }
+    logout();
+  };
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
       {/* Minimal header fixed */}
@@ -20,7 +34,7 @@ export const DriverLayout = () => {
           <span className="text-lg font-black tracking-tight">مندوب</span>
         </div>
         <button
-          onClick={logout}
+          onClick={handleLogout}
           className="text-sm font-semibold bg-white/20 hover:bg-white/30 active:bg-white/40 px-3 py-1.5 rounded-lg transition-colors"
         >
           خروج

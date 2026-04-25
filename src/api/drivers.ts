@@ -43,4 +43,13 @@ export const driversApi = {
 
   setAvailability: (is_available: boolean) =>
     apiClient.post('/drivers/me/availability', { is_available }).then(r => r.data),
+
+  presenceOpen: () =>
+    apiClient.post('/drivers/me/presence/open').then(r => r.data),
+
+  presenceHeartbeat: (is_interacting: boolean) =>
+    apiClient.post('/drivers/me/presence/heartbeat', { is_interacting }).then(r => r.data),
+
+  presenceClose: () =>
+    apiClient.post('/drivers/me/presence/close').then(r => r.data),
 };

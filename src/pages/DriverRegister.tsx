@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../api/auth';
+import { parseEgyptianNationalId } from '../utils/egyptianNationalId';
 
 export const DriverRegister = () => {
   const navigate = useNavigate();
@@ -31,6 +32,11 @@ export const DriverRegister = () => {
     }
     if (form.password.length < 8) {
       setError('يجب أن تكون كلمة المرور 8 أحرف على الأقل.');
+      return;
+    }
+    const idResult = parseEgyptianNationalId(form.national_id_number);
+    if (!idResult.valid) {
+      setError(`الرقم القومي غير صحيح: ${idResult.error}`);
       return;
     }
     setError('');
