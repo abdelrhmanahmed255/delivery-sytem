@@ -218,14 +218,6 @@ export const DriverHome = () => {
               </div>
             </>
           )}
-            <>
-              <span className="text-7xl">😴</span>
-              <div>
-                <p className="text-xl font-black text-gray-700">أنت غير متاح</p>
-                <p className="text-gray-400 text-sm mt-1">فعّل التوفر من الزر أعلاه لاستقبال الطلبات</p>
-              </div>
-            </>
-          )}
         </div>
       )}
     </div>
