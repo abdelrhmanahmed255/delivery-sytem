@@ -155,7 +155,42 @@ export const AdminOrders = () => {
 
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Card View */}
+        <div className="md:hidden divide-y divide-gray-100">
+          {isLoading && <p className="px-4 py-8 text-center text-gray-400">جارٍ تحميل الطلبات...</p>}
+          {!isLoading && data?.items?.length === 0 && <p className="px-4 py-8 text-center text-gray-400">لا توجد طلبات</p>}
+          {data?.items?.map((order: any) => (
+            <div key={order.id} className="p-4 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-gray-900">{order.customer.full_name}</p>
+                  <p className="text-xs text-gray-400">{order.customer.phone}</p>
+                  <p className="text-xs font-mono text-gray-300">{order.code}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <StatusBadge status={order.status} />
+                  <span className="text-sm font-bold text-gray-900">{order.price} ج.م</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2 truncate">{order.pickup_address}</p>
+              <div className="flex items-center justify-between text-xs text-gray-500">
+                <span>المندوب: {order.assigned_driver?.full_name ?? '—'}</span>
+                <span>{order.delivery_eta_minutes} د</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setShowOffers(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium">العروض</button>
+                {['pending', 'offered'].includes(order.status) && (
+                  <button onClick={() => { setShowAssign(order.id); setAssignDriverId(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium">تعيين مندوب</button>
+                )}
+                {!['completed', 'cancelled', 'expired'].includes(order.status) && (
+                  <button onClick={() => { setShowCancel(order.id); setCancelReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 font-medium">إلغاء</button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-gray-50">
               <tr>

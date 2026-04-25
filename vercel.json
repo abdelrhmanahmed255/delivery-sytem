@@ -3,6 +3,7 @@
     { "source": "/auth/:path*", "destination": "https://delivry-backend.vercel.app/auth/:path*" },
     { "source": "/admin/:path*", "destination": "https://delivry-backend.vercel.app/admin/:path*" },
     { "source": "/drivers/:path*", "destination": "https://delivry-backend.vercel.app/drivers/:path*" },
+    { "source": "/driver/:path*", "destination": "https://delivry-backend.vercel.app/driver/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

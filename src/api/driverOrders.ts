@@ -14,7 +14,10 @@ export const driverOrdersApi = {
     apiClient.post(`/driver/orders/offers/${offerId}/ignore`).then(r => r.data),
 
   activeOrders: () =>
-    apiClient.get('/driver/orders/active').then(r => r.data),
+    apiClient.get('/driver/orders/active').then(r => {
+      const d = r.data;
+      return Array.isArray(d) ? d : (d?.items ?? d?.orders ?? []);
+    }),
 
   pickup: (orderId: number) =>
     apiClient.post(`/driver/orders/${orderId}/pickup`).then(r => r.data),

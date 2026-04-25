@@ -96,7 +96,26 @@ export const AdminCustomers = () => {
       </form>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Card View */}
+        <div className="md:hidden divide-y divide-gray-100">
+          {isLoading && <p className="px-4 py-8 text-center text-gray-400">جارٍ التحميل...</p>}
+          {!isLoading && data?.items?.length === 0 && <p className="px-4 py-8 text-center text-gray-400">لا يوجد عملاء.</p>}
+          {data?.items?.map((c: any) => (
+            <div key={c.id} className="p-4 space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-gray-900">{c.full_name}</p>
+                  <p className="text-sm text-gray-500">{c.phone}</p>
+                  <p className="text-sm text-gray-600 mt-1">{c.address}</p>
+                  {c.notes && <p className="text-xs text-gray-400 mt-1">{c.notes}</p>}
+                </div>
+                <button onClick={() => openEdit(c)} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium flex-shrink-0">تعديل</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-gray-50">
               <tr>

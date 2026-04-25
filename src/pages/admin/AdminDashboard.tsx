@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../../api/client';
 import { StatusBadge } from '../../components/StatusBadge';
 
 export const AdminDashboard = () => {
+    const navigate = useNavigate();
     // Quick example calling /admin/activity or orders
     const { data, isLoading } = useQuery({
         queryKey: ['recentOrders'],
@@ -27,7 +29,7 @@ export const AdminDashboard = () => {
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-6 border-b border-gray-100 flex justify-between items-center">
                     <h3 className="text-lg font-semibold text-gray-800">أحدث الطلبات</h3>
-                    <button className="text-emerald-600 font-medium hover:text-emerald-700 text-sm">عرض الكل</button>
+                    <button className="text-emerald-600 font-medium hover:text-emerald-700 text-sm" onClick={() => navigate('/admin/orders')}>عرض الكل</button>
                 </div>
                 <div className="p-6">
                     {isLoading ? (

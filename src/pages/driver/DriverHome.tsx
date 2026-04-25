@@ -49,6 +49,10 @@ export const DriverHome = () => {
   const isAvailable = me?.is_available;
   const isRestricted = me?.restricted_until && new Date(me.restricted_until) > new Date();
 
+  // The current-offer endpoint may return the ID under different field names
+  const pendingOfferId: number | undefined =
+    offerSummary?.id ?? offerSummary?.offer_id ?? offerSummary?.order_offer_id;
+
   const offerOrder = openedOffer?.order ?? openedOffer;
 
   return (
@@ -163,15 +167,15 @@ export const DriverHome = () => {
           </div>
           <div className="px-4 pb-4 space-y-2">
             <button
-              onClick={() => openOfferMutation.mutate(offerSummary.id)}
-              disabled={openOfferMutation.isPending}
+              onClick={() => pendingOfferId && openOfferMutation.mutate(pendingOfferId)}
+              disabled={openOfferMutation.isPending || !pendingOfferId}
               className="w-full bg-white text-blue-700 font-black py-4 rounded-2xl text-lg shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
             >
               {openOfferMutation.isPending ? 'جارٍ الفتح...' : '👁 اعرض التفاصيل والسعر'}
             </button>
             <button
-              onClick={() => ignoreOfferMutation.mutate(offerSummary.id)}
-              disabled={ignoreOfferMutation.isPending}
+              onClick={() => pendingOfferId && ignoreOfferMutation.mutate(pendingOfferId)}
+              disabled={ignoreOfferMutation.isPending || !pendingOfferId}
               className="w-full text-blue-300 font-semibold py-2 text-base active:opacity-60"
             >
               تجاهل هذا الطلب

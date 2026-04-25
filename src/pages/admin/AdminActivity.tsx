@@ -67,7 +67,29 @@ export const AdminActivity = () => {
       <h2 className="text-2xl font-bold text-gray-800">سجل النشاط</h2>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Card View */}
+        <div className="md:hidden divide-y divide-gray-100">
+          {isLoading && <p className="px-4 py-8 text-center text-gray-400">جارٍ التحميل...</p>}
+          {data?.items?.map((log: any) => (
+            <div key={log.id} className="p-4 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${log.actor_type === 'admin' ? 'bg-emerald-100 text-emerald-700' : log.actor_type === 'driver' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                  {ACTOR_LABELS[log.actor_type] ?? log.actor_type}{log.actor_id ? ` #${log.actor_id}` : ''}
+                </span>
+                <span className="text-xs text-gray-400">{formatDate(log.created_at)}</span>
+              </div>
+              <p className="text-sm font-semibold text-gray-800">{ACTION_LABELS[log.action] ?? log.action}</p>
+              {log.target_type && (
+                <p className="text-xs text-gray-500">{TARGET_LABELS[log.target_type] ?? log.target_type} #{log.target_id}</p>
+              )}
+              {log.details && (
+                <p className="text-xs text-gray-400 break-words">{typeof log.details === 'object' ? JSON.stringify(log.details) : log.details}</p>
+              )}
+            </div>
+          ))}
+        </div>
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-gray-50">
               <tr>

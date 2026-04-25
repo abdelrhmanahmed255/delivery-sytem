@@ -99,7 +99,50 @@ export const AdminDrivers = () => {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Card View */}
+        <div className="md:hidden divide-y divide-gray-100">
+          {isLoading && <p className="px-4 py-8 text-center text-gray-400">جارٍ تحميل المناديبين...</p>}
+          {!isLoading && data?.items?.length === 0 && <p className="px-4 py-8 text-center text-gray-400">لا يوجد مناديبون.</p>}
+          {data?.items?.map((driver: any) => (
+            <div key={driver.id} className="p-4 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-gray-900">{driver.full_name}</p>
+                  <p className="text-xs text-gray-400">{driver.legal_arabic_name}</p>
+                  <p className="text-sm text-gray-500">{driver.phone}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <StatusBadge status={driver.approval_status} />
+                  {isRestricted(driver) && (
+                    <span className="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full font-semibold">موقوف</span>
+                  )}
+                  <span className={`text-xs font-semibold px-2 py-1 rounded-full ${driver.is_available ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {driver.is_available ? 'متاح' : 'غير متاح'}
+                  </span>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">مخالفات: <span className="font-bold text-gray-700">{driver.consecutive_strikes}</span></p>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setShowDetails(driver)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-50 text-gray-700 border border-gray-200 font-medium">تفاصيل</button>
+                {driver.approval_status === 'pending' && (
+                  <>
+                    <button onClick={() => approveMutation.mutate(driver.id)} disabled={approveMutation.isPending} className="text-xs px-3 py-1.5 rounded-lg bg-green-50 text-green-700 font-medium">موافقة</button>
+                    <button onClick={() => { setShowReject(driver); setRejectNote(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 font-medium">رفض</button>
+                  </>
+                )}
+                {driver.approval_status === 'approved' && (
+                  isRestricted(driver) ? (
+                    <button onClick={() => unrestrictMutation.mutate(driver.id)} className="text-xs px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 font-medium">رفع الإيقاف</button>
+                  ) : (
+                    <button onClick={() => { setShowRestrict(driver); setRestrictMinutes('60'); setRestrictReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-orange-50 text-orange-700 font-medium">إيقاف</button>
+                  )
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-gray-50">
               <tr>
