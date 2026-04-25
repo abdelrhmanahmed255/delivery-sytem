@@ -229,7 +229,7 @@ export const DriverActiveOrders = () => {
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4 max-w-lg mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-800">توصيلاتي</h2>
         <span className="bg-blue-100 text-blue-700 font-black text-sm px-3 py-1 rounded-full">

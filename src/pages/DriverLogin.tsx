@@ -54,7 +54,7 @@ export const DriverLogin = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors text-base"
-              placeholder="example@email.com"
+              placeholder="البريد الإلكتروني"
               autoComplete="email"
             />
           </div>
@@ -89,20 +89,20 @@ export const DriverLogin = () => {
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-500 mt-6">
+        <p className="text-center text-sm font-medium text-gray-500 mt-6 pt-6 border-t border-gray-100">
           مندوب جديد؟{' '}
           <Link to="/register" className="text-blue-600 font-bold hover:underline">
             سجّل طلبك هنا
           </Link>
         </p>
 
-        <div className="mt-6 pt-6 border-t border-gray-100 text-center">
-          <a
-            href="/login/admin"
-            className="text-xs text-gray-300 hover:text-gray-500 transition-colors"
+        <div className="mt-6 text-center">
+          <Link
+            to="/login/admin"
+            className="text-xs font-semibold text-gray-300 hover:text-gray-500 transition-colors"
           >
             دخول المسؤولين
-          </a>
+          </Link>
         </div>
       </div>
     </div>

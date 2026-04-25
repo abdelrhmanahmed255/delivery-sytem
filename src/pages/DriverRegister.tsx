@@ -69,7 +69,7 @@ export const DriverRegister = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg overflow-hidden">
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-lg overflow-hidden">
         {/* Header */}
         <div className="bg-blue-600 p-6 text-white">
           <h1 className="text-2xl font-bold">انضم كمندوب توصيل</h1>
@@ -92,14 +92,14 @@ export const DriverRegister = () => {
           {/* Step 1 */}
           {step === 1 && (
             <form onSubmit={handleStep1} className="space-y-4">
-              <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">الاسم الكامل (إنجليزي) *</label>
                   <input
                     type="text" required
                     value={form.full_name}
                     onChange={e => setField('full_name', e.target.value)}
-                    placeholder="John Doe"
+                    placeholder="الاسم بالإنجليزية"
                     dir="ltr"
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
                   />
@@ -117,10 +117,10 @@ export const DriverRegister = () => {
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">رقم البطاقة الوطنية *</label>
                   <input
-                    type="text" required minLength={4}
+                    type="text" required minLength={14} maxLength={14} pattern="\d{14}"
                     value={form.national_id_number}
                     onChange={e => setField('national_id_number', e.target.value)}
-                    placeholder="مثال: ٢٨٥٠١٠١٢٣٤٥٦٧"
+                    placeholder="١٤ رقم"
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
                   />
                 </div>
@@ -130,7 +130,7 @@ export const DriverRegister = () => {
                     type="email" required
                     value={form.email}
                     onChange={e => setField('email', e.target.value)}
-                    placeholder="example@email.com"
+                    placeholder="البريد الإلكتروني"
                     dir="ltr"
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
                   />
@@ -138,10 +138,10 @@ export const DriverRegister = () => {
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">رقم الهاتف *</label>
                   <input
-                    type="tel" required minLength={4}
+                    type="tel" required minLength={10}
                     value={form.phone}
                     onChange={e => setField('phone', e.target.value)}
-                    placeholder="01xxxxxxxxx"
+                    placeholder="رقم الهاتف"
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
                   />
                 </div>
@@ -175,6 +175,12 @@ export const DriverRegister = () => {
               >
                 التالي ←
               </button>
+
+              <div className="text-center mt-6 pt-6 border-t border-gray-100">
+                <Link to="/login" className="text-sm font-semibold text-gray-500 hover:text-gray-700">
+                  لديك حساب بالفعل؟ تسجيل الدخول
+                </Link>
+              </div>
             </form>
           )}
 
@@ -206,27 +212,21 @@ export const DriverRegister = () => {
                 <button
                   type="button"
                   onClick={() => { setStep(1); setError(''); }}
-                  className="flex-1 border border-gray-200 text-gray-700 font-semibold py-3 rounded-xl hover:bg-gray-50 transition-colors"
+                  disabled={loading}
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-4 rounded-xl transition-colors disabled:opacity-60"
                 >
-                  → رجوع
+                  العودة
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors disabled:opacity-50"
+                  className="flex-[2] bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
                 >
-                  {loading ? 'جارٍ الإرسال...' : 'إرسال الطلب'}
+                  {loading ? 'جارٍ الإرسال...' : 'إرسال الطلب ✓'}
                 </button>
               </div>
             </form>
           )}
-
-          <p className="text-center text-sm text-gray-500 mt-5">
-            لديك حساب بالفعل؟{' '}
-            <Link to="/login" className="text-blue-600 font-semibold hover:underline">
-              تسجيل الدخول
-            </Link>
-          </p>
         </div>
       </div>
     </div>

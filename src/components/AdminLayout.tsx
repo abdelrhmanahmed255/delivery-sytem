@@ -62,20 +62,23 @@ export const AdminLayout = () => {
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-50 md:hidden">
+      <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-50 md:hidden pb-safe">
         <div className="flex justify-around items-center h-16 overflow-x-auto">
           {navItems.map(item => {
-            const isActive = location.pathname === item.path;
+            const isActive = location.pathname.startsWith(item.path);
             return (
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex flex-col items-center justify-center flex-1 h-full space-y-0.5 text-center transition-colors min-w-0 ${
+                className={`relative flex flex-col items-center justify-center flex-1 h-full space-y-0.5 text-center transition-colors min-w-0 ${
                   isActive ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-600'
                 }`}
               >
-                <span className="text-lg leading-none">{item.icon}</span>
-                <span className="text-[10px] font-semibold leading-none truncate px-0.5">{item.name}</span>
+                <span className={`text-lg leading-none transition-transform duration-200 ${isActive ? 'scale-110' : 'scale-100'}`}>{item.icon}</span>
+                <span className={`text-[10px] font-semibold leading-none truncate px-0.5 ${isActive ? 'font-bold' : ''}`}>{item.name}</span>
+                {isActive && (
+                  <span className="absolute top-0 inset-x-4 h-0.5 bg-emerald-600 rounded-b-full shadow-sm" />
+                )}
               </Link>
             );
           })}

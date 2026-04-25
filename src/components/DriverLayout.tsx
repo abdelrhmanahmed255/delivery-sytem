@@ -13,8 +13,8 @@ export const DriverLayout = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
-      {/* Minimal header */}
-      <header className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between shadow-md">
+      {/* Minimal header fixed */}
+      <header className="fixed top-0 inset-x-0 z-50 bg-blue-600 text-white px-4 py-3 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-2">
           <span className="text-2xl">🏍️</span>
           <span className="text-lg font-black tracking-tight">مندوب</span>
@@ -28,7 +28,7 @@ export const DriverLayout = () => {
       </header>
 
       {/* Scrollable page content */}
-      <main className="flex-1 overflow-y-auto pb-20">
+      <main className="flex-1 overflow-y-auto pt-16 pb-20 bg-gray-50">
         <Outlet />
       </main>
 

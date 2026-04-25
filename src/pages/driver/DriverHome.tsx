@@ -56,7 +56,7 @@ export const DriverHome = () => {
   const offerOrder = openedOffer?.order ?? openedOffer;
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4 max-w-lg mx-auto">
       {/* ── Availability toggle ─────────────────────────── */}
       <button
         onClick={() => !isRestricted && availabilityMutation.mutate(!isAvailable)}
@@ -118,6 +118,13 @@ export const DriverHome = () => {
               <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
                 <p className="text-xs font-bold text-emerald-600 mb-1">🏠 منطقة التوصيل</p>
                 <p className="text-gray-900 font-semibold">{offerOrder.customer.address}</p>
+                <a
+                  href={`https://maps.google.com/maps?q=${encodeURIComponent(offerOrder.customer.address)}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 mt-3 bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl active:scale-95"
+                >
+                  🗺️ افتح الخريطة
+                </a>
               </div>
             )}
 
@@ -190,18 +197,27 @@ export const DriverHome = () => {
           {isAvailable ? (
             <>
               <div className="relative w-28 h-28">
-                <div className="absolute inset-0 rounded-full bg-blue-100 animate-ping opacity-60" />
-                <div className="relative flex items-center justify-center w-28 h-28 rounded-full bg-blue-50">
+                <div className="absolute inset-0 rounded-full bg-emerald-100 animate-ping opacity-60" />
+                <div className="relative flex items-center justify-center w-28 h-28 rounded-full bg-emerald-50">
                   <span className="text-5xl">📡</span>
                 </div>
               </div>
               <div>
                 <p className="text-xl font-black text-gray-800">جاهز للطلبات</p>
                 <p className="text-gray-400 text-sm mt-1">سيظهر الطلب هنا فور توفره</p>
-                <p className="text-gray-300 text-xs mt-3">يتم التحديث كل ٨ ثوانٍ</p>
               </div>
             </>
           ) : (
+            <>
+              <div className="relative w-28 h-28 flex items-center justify-center rounded-full bg-gray-50 border-4 border-gray-100">
+                <span className="text-5xl opacity-50">😴</span>
+              </div>
+              <div>
+                <p className="text-xl font-black text-gray-800">غير متاح للطلبات</p>
+                <p className="text-gray-400 text-sm mt-1">قم بتفعيل التوفر لاستقبال طلبات جديدة</p>
+              </div>
+            </>
+          )}
             <>
               <span className="text-7xl">😴</span>
               <div>
