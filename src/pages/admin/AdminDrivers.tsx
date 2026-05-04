@@ -44,9 +44,14 @@ export const AdminDrivers = () => {
   const [showDetails, setShowDetails] = useState<any>(null);
   const [showRestrict, setShowRestrict] = useState<any>(null);
   const [showReject, setShowReject] = useState<any>(null);
+  const [showShiftClose, setShowShiftClose] = useState<any>(null);
+  const [showShiftHistory, setShowShiftHistory] = useState<any>(null);
+  const [shiftHistoryOffset, setShiftHistoryOffset] = useState(0);
   const [rejectNote, setRejectNote] = useState('');
   const [restrictMinutes, setRestrictMinutes] = useState('60');
   const [restrictReason, setRestrictReason] = useState('');
+  const [closePayout, setClosePayout] = useState('');
+  const [closeNote, setCloseNote] = useState('');
   const LIMIT = 20;
 
   const [form, setForm] = useState({
@@ -83,6 +88,31 @@ export const AdminDrivers = () => {
   const unrestrictMutation = useMutation({
     mutationFn: (id: number) => driversApi.unrestrict(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['drivers'] }),
+  });
+
+  const openShiftMutation = useMutation({
+    mutationFn: (id: number) => driversApi.openShift(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['drivers'] }),
+  });
+
+  const closeShiftMutation = useMutation({
+    mutationFn: () => driversApi.closeShift(showShiftClose.id, {
+      recorded_payout: closePayout ? closePayout : undefined,
+      closing_note: closeNote || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['drivers'] });
+      setShowShiftClose(null);
+      setClosePayout('');
+      setCloseNote('');
+    },
+  });
+
+  const SHIFT_LIMIT = 10;
+  const { data: shiftHistoryData, isLoading: shiftHistoryLoading } = useQuery({
+    queryKey: ['driver-shifts', showShiftHistory?.id, shiftHistoryOffset],
+    queryFn: () => driversApi.listShifts(showShiftHistory.id, { limit: SHIFT_LIMIT, offset: shiftHistoryOffset }),
+    enabled: !!showShiftHistory,
   });
 
   const isRestricted = (driver: any) => driver.restricted_until && new Date(driver.restricted_until) > new Date();
@@ -158,6 +188,14 @@ export const AdminDrivers = () => {
                     <button onClick={() => { setShowRestrict(driver); setRestrictMinutes('60'); setRestrictReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-orange-50 text-orange-700 font-medium">إيقاف</button>
                   )
                 )}
+                {driver.approval_status === 'approved' && (
+                  driver.current_shift_id ? (
+                    <button onClick={() => { setShowShiftClose(driver); setClosePayout(''); setCloseNote(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 font-medium border border-red-200">إغلاق وردية</button>
+                  ) : (
+                    <button onClick={() => openShiftMutation.mutate(driver.id)} disabled={openShiftMutation.isPending} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium border border-blue-200">فتح وردية</button>
+                  )
+                )}
+                <button onClick={() => { setShowShiftHistory(driver); setShiftHistoryOffset(0); }} className="text-xs px-3 py-1.5 rounded-lg bg-gray-50 text-gray-600 border border-gray-200 font-medium">الورديات</button>
               </div>
             </div>
           ))}
@@ -191,6 +229,9 @@ export const AdminDrivers = () => {
                     <StatusBadge status={driver.approval_status} />
                     {isRestricted(driver) && (
                       <span className="ml-1 px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full font-semibold">موقوف</span>
+                    )}
+                    {driver.current_shift_id && (
+                      <span className="ml-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-semibold">وردية مفتوحة</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -241,6 +282,30 @@ export const AdminDrivers = () => {
                           </button>
                         )
                       )}
+                      {driver.approval_status === 'approved' && (
+                        driver.current_shift_id ? (
+                          <button
+                            onClick={() => { setShowShiftClose(driver); setClosePayout(''); setCloseNote(''); }}
+                            className="text-xs px-2 py-1 rounded-md bg-red-50 text-red-700 hover:bg-red-100 font-medium border border-red-200"
+                          >
+                            إغلاق وردية
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => openShiftMutation.mutate(driver.id)}
+                            disabled={openShiftMutation.isPending}
+                            className="text-xs px-2 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium border border-blue-200"
+                          >
+                            فتح وردية
+                          </button>
+                        )
+                      )}
+                      <button
+                        onClick={() => { setShowShiftHistory(driver); setShiftHistoryOffset(0); }}
+                        className="text-xs px-2 py-1 rounded-md bg-gray-50 text-gray-600 hover:bg-gray-100 font-medium border border-gray-200"
+                      >
+                        الورديات
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -442,6 +507,99 @@ export const AdminDrivers = () => {
             >
               {restrictMutation.isPending ? 'جارٍ الإيقاف...' : 'تطبيق الإيقاف'}
             </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Close Shift Modal */}
+      {showShiftClose && (
+        <Modal title={`إغلاق وردية — ${showShiftClose.full_name}`} onClose={() => setShowShiftClose(null)}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              رقم الوردية الحالية: <span className="font-bold text-gray-800">#{showShiftClose.current_shift_id}</span>
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">المبلغ المدفوع (اختياري)</label>
+              <input
+                type="number" min="0" step="0.01"
+                value={closePayout}
+                onChange={e => setClosePayout(e.target.value)}
+                placeholder="0.00"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات الإغلاق (اختياري)</label>
+              <textarea
+                value={closeNote}
+                onChange={e => setCloseNote(e.target.value)}
+                rows={3}
+                placeholder="ملاحظات حول الوردية..."
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
+              />
+            </div>
+            {closeShiftMutation.isError && (
+              <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">فشل إغلاق الوردية. حاول مرة أخرى.</p>
+            )}
+            <button
+              onClick={() => closeShiftMutation.mutate()}
+              disabled={closeShiftMutation.isPending}
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {closeShiftMutation.isPending ? 'جارٍ الإغلاق...' : 'إغلاق الوردية'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Shift History Modal */}
+      {showShiftHistory && (
+        <Modal title={`سجل الورديات — ${showShiftHistory.full_name}`} onClose={() => setShowShiftHistory(null)}>
+          <div className="space-y-3">
+            {shiftHistoryLoading && <p className="text-center text-gray-400 py-6">جارٍ التحميل...</p>}
+            {!shiftHistoryLoading && shiftHistoryData?.items?.length === 0 && (
+              <p className="text-center text-gray-400 py-6">لا توجد ورديات مسجلة.</p>
+            )}
+            {shiftHistoryData?.items?.map((shift: any) => (
+              <div key={shift.id} className="border border-gray-100 rounded-xl p-4 space-y-2 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-gray-800 text-sm">وردية #{shift.id}</span>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${shift.closed_at ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>
+                    {shift.closed_at ? 'مغلقة' : 'مفتوحة'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                  <div>
+                    <p className="text-gray-400">فُتحت</p>
+                    <p className="font-medium">{new Date(shift.opened_at).toLocaleString('ar-EG')}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400">أُغلقت</p>
+                    <p className="font-medium">{shift.closed_at ? new Date(shift.closed_at).toLocaleString('ar-EG') : '—'}</p>
+                  </div>
+                  {shift.recorded_payout && (
+                    <div>
+                      <p className="text-gray-400">المبلغ المدفوع</p>
+                      <p className="font-semibold text-green-700">{shift.recorded_payout} ج.م</p>
+                    </div>
+                  )}
+                  {shift.closing_note && (
+                    <div className="col-span-2">
+                      <p className="text-gray-400">ملاحظات</p>
+                      <p className="font-medium">{shift.closing_note}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {shiftHistoryData && (
+              <Pagination
+                total={shiftHistoryData.total}
+                limit={SHIFT_LIMIT}
+                offset={shiftHistoryOffset}
+                onPageChange={setShiftHistoryOffset}
+              />
+            )}
           </div>
         </Modal>
       )}

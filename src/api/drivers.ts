@@ -52,4 +52,17 @@ export const driversApi = {
 
   presenceClose: () =>
     apiClient.post('/drivers/me/presence/close').then(r => r.data),
+
+  // Shift management (admin only)
+  openShift: (driverId: number) =>
+    apiClient.post(`/admin/drivers/${driverId}/shifts/open`).then(r => r.data),
+
+  closeShift: (driverId: number, payload?: { recorded_payout?: number | string; closing_note?: string }) =>
+    apiClient.post(`/admin/drivers/${driverId}/shifts/close`, payload ?? {}).then(r => r.data),
+
+  getCurrentShift: (driverId: number) =>
+    apiClient.get(`/admin/drivers/${driverId}/shifts/current`).then(r => r.data),
+
+  listShifts: (driverId: number, params?: { limit?: number; offset?: number }) =>
+    apiClient.get(`/admin/drivers/${driverId}/shifts`, { params }).then(r => r.data),
 };
