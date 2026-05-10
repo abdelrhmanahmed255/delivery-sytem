@@ -14,6 +14,8 @@ import { AdminOrders } from './pages/admin/AdminOrders';
 import { AdminDrivers } from './pages/admin/AdminDrivers';
 import { AdminCustomers } from './pages/admin/AdminCustomers';
 import { AdminActivity } from './pages/admin/AdminActivity';
+import { AdminAnalytics } from './pages/admin/AdminAnalytics';
+import { AdminShifts } from './pages/admin/AdminShifts';
 import { AdminSettings } from './pages/admin/AdminSettings';
 
 import { DriverHome } from './pages/driver/DriverHome';
@@ -42,6 +44,8 @@ function App() {
               <Route path="orders" element={<AdminOrders />} />
               <Route path="drivers" element={<AdminDrivers />} />
               <Route path="customers" element={<AdminCustomers />} />
+              <Route path="shifts" element={<AdminShifts />} />
+              <Route path="analytics" element={<AdminAnalytics />} />
               <Route path="activity" element={<AdminActivity />} />
               <Route path="settings" element={<AdminSettings />} />
             </Route>

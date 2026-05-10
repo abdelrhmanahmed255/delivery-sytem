@@ -10,6 +10,8 @@ export const AdminLayout = () => {
     { name: 'الطلبات', path: '/admin/orders', icon: '📋' },
     { name: 'المناديب', path: '/admin/drivers', icon: '🚚' },
     { name: 'العملاء', path: '/admin/customers', icon: '👥' },
+    { name: 'الورديات', path: '/admin/shifts', icon: '🕒' },
+    { name: 'التحليلات', path: '/admin/analytics', icon: '📈' },
     { name: 'النشاط', path: '/admin/activity', icon: '📊' },
     { name: 'الإعدادات', path: '/admin/settings', icon: '⚙️' },
   ];
