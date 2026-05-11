@@ -319,39 +319,42 @@ export const AdminOrders = () => {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {!orderCustomerFilter && (
               <>
                 <span className="text-xs text-gray-500 whitespace-nowrap hidden sm:inline">
-                  {todayMode ? `📅 ${todayLabel}` : 'كل التواريخ'}
+                  {todayMode ? `📅 ${todayLabel}` : '📚 عرض كامل السجل'}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => { setShowAllDates(s => !s); setOffset(0); }}
-                  className={`text-xs font-semibold px-3 py-2 rounded-lg border transition-colors whitespace-nowrap ${
-                    todayMode
-                      ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  {todayMode ? 'اليوم فقط ✓' : 'عرض اليوم فقط'}
-                </button>
-                {!todayMode && (
+                {todayMode ? (
+                  // Default view: today only. One button to switch to all-time history.
+                  <button
+                    type="button"
+                    onClick={() => { setShowAllDates(true); setOffset(0); }}
+                    className="text-xs font-semibold px-3 py-2 rounded-lg border bg-white text-gray-700 border-gray-200 hover:bg-gray-50 transition-colors whitespace-nowrap"
+                    title="عرض جميع الطلبات السابقة"
+                  >
+                    📋 عرض كل الطلبات
+                  </button>
+                ) : (
+                  // History view: one button to return to today's auto-rolling list.
                   <button
                     type="button"
                     onClick={() => { setShowAllDates(false); setOffset(0); }}
-                    className="text-xs font-medium px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
+                    className="text-xs font-semibold px-3 py-2 rounded-lg border bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 transition-colors whitespace-nowrap"
+                    title="العودة لعرض طلبات اليوم تلقائياً"
                   >
-                    عودة لليوم
+                    📅 عرض اليوم فقط
                   </button>
                 )}
               </>
             )}
           </div>
         </div>
-        {todayMode && !orderCustomerFilter && (
-          <p className="text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 inline-block">
-            📅 يتم عرض طلبات اليوم فقط ({visibleOrders.length}). تنتقل القائمة تلقائياً لليوم التالي عند انتهاء اليوم الحالي.
+        {!orderCustomerFilter && (
+          <p className={`text-xs rounded-lg px-3 py-1.5 inline-block ${todayMode ? 'text-emerald-700 bg-emerald-50' : 'text-gray-600 bg-gray-50'}`}>
+            {todayMode
+              ? `📅 يتم عرض طلبات اليوم فقط (${visibleOrders.length}). تنتقل القائمة تلقائياً لليوم التالي عند انتهاء اليوم الحالي.`
+              : `📚 يتم عرض كامل سجل الطلبات${data ? ` (${data.total} طلب)` : ''}. اضغط "عرض اليوم فقط" للعودة لعرض اليوم.`}
           </p>
         )}
       </div>
