@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { customersApi } from '../../api/customers';
 import { Pagination } from '../../components/Pagination';
 import { Modal } from '../../components/Modal';
+import { handlePhonePaste, normalizeEgyptPhone, normalizeIfPhoneLike } from '../../utils/phone';
 
 export const AdminCustomers = () => {
   const queryClient = useQueryClient();
@@ -17,16 +18,25 @@ export const AdminCustomers = () => {
 
   const { data, isLoading } = useQuery({
     queryKey: ['customers', search, offset],
-    queryFn: () => customersApi.list({ search: search || undefined, limit: LIMIT, offset }),
+    queryFn: () => customersApi.list({ search: search ? normalizeIfPhoneLike(search) : undefined, limit: LIMIT, offset }),
+  });
+
+  // Always submit the normalized phone form so DB rows are consistent and
+  // future searches match regardless of which format was originally pasted.
+  const buildPayload = () => ({
+    full_name: form.full_name,
+    phone: normalizeEgyptPhone(form.phone) || form.phone,
+    address: form.address,
+    notes: form.notes || undefined,
   });
 
   const createMutation = useMutation({
-    mutationFn: () => customersApi.create({ full_name: form.full_name, phone: form.phone, address: form.address, notes: form.notes || undefined }),
+    mutationFn: () => customersApi.create(buildPayload()),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers'] }); setShowCreate(false); setForm({ full_name: '', phone: '', address: '', notes: '' }); },
   });
 
   const updateMutation = useMutation({
-    mutationFn: () => customersApi.update(editing.id, { full_name: form.full_name, phone: form.phone, address: form.address, notes: form.notes || undefined }),
+    mutationFn: () => customersApi.update(editing.id, buildPayload()),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers'] }); setEditing(null); },
   });
 
@@ -37,18 +47,28 @@ export const AdminCustomers = () => {
 
   const CustomerForm = ({ onSubmit, loading, label }: { onSubmit: () => void; loading: boolean; label: string }) => (
     <form className="space-y-3" onSubmit={e => { e.preventDefault(); onSubmit(); }}>
-      {([['full_name', 'الاسم الكامل *', 'text'], ['phone', 'رقم الهاتف *', 'tel'], ['address', 'العنوان *', 'text']] as [string, string, string][]).map(([key, lbl, type]) => (
-        <div key={key}>
-          <label className="block text-sm font-medium text-gray-700 mb-1">{lbl}</label>
-          <input
-            type={type}
-            required
-            value={(form as any)[key]}
-            onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-          />
-        </div>
-      ))}
+      {([['full_name', 'الاسم الكامل *', 'text'], ['phone', 'رقم الهاتف *', 'tel'], ['address', 'العنوان *', 'text']] as [string, string, string][]).map(([key, lbl, type]) => {
+        const isPhone = key === 'phone';
+        return (
+          <div key={key}>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{lbl}</label>
+            <input
+              type={type}
+              required
+              value={(form as any)[key]}
+              onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+              onPaste={isPhone ? handlePhonePaste(v => setForm(f => ({ ...f, phone: v }))) : undefined}
+              onBlur={isPhone ? (e => {
+                const v = normalizeEgyptPhone(e.target.value);
+                if (v && v !== e.target.value) setForm(f => ({ ...f, phone: v }));
+              }) : undefined}
+              dir={isPhone ? 'ltr' : undefined}
+              placeholder={isPhone ? '01XXXXXXXXX (يدعم الصق من واتساب)' : undefined}
+              className={`w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 ${isPhone ? 'text-right' : ''}`}
+            />
+          </div>
+        );
+      })}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات</label>
         <textarea
@@ -81,12 +101,13 @@ export const AdminCustomers = () => {
       </div>
 
       {/* Search */}
-      <form className="flex gap-2" onSubmit={e => { e.preventDefault(); setSearch(searchInput); setOffset(0); }}>
+      <form className="flex gap-2" onSubmit={e => { e.preventDefault(); setSearch(normalizeIfPhoneLike(searchInput)); setOffset(0); }}>
         <input
           type="text"
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
-          placeholder="ابحث بالاسم أو الهاتف أو العنوان..."
+          onPaste={handlePhonePaste(setSearchInput)}
+          placeholder="ابحث بالاسم أو الهاتف أو العنوان... (يدعم الصق من واتساب)"
           className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
         />
         <button type="submit" className="px-4 py-2 bg-gray-800 text-white text-sm rounded-lg hover:bg-gray-700">بحث</button>

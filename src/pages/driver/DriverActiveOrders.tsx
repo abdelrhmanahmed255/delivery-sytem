@@ -115,11 +115,15 @@ const OrderCard = ({
           </div>
         )}
 
-        <div className="flex items-center justify-between bg-gray-50 rounded-xl p-3 gap-3">
-          <div className="min-w-0">
+        <div className="flex items-start justify-between bg-gray-50 rounded-xl p-3 gap-3">
+          <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-gray-400">العميل</p>
-            <p className="font-black text-gray-900 truncate">{order.customer.full_name}</p>
-            <p className="text-sm text-gray-500">{order.customer.phone}</p>
+            <p className="font-black text-gray-900 break-words whitespace-normal leading-snug">
+              {order.customer.full_name}
+            </p>
+            <p className="text-sm text-gray-500 break-words whitespace-normal" dir="ltr">
+              {order.customer.phone}
+            </p>
           </div>
           <a
             href={`tel:${order.customer.phone}`}
@@ -132,9 +136,13 @@ const OrderCard = ({
 
         <div className="bg-blue-50 rounded-xl p-3">
           <p className="text-xs font-bold text-blue-700 mb-1">📍 نقطة الاستلام</p>
-          <p className="text-gray-900 font-semibold leading-snug">{order.pickup_address}</p>
+          <p className="text-gray-900 font-semibold leading-snug break-words whitespace-normal">
+            {order.pickup_address}
+          </p>
           {order.pickup_contact && (
-            <p className="text-xs text-gray-500 mt-1">جهة الاتصال: {order.pickup_contact}</p>
+            <p className="text-xs text-gray-500 mt-1 break-words whitespace-normal">
+              جهة الاتصال: {order.pickup_contact}
+            </p>
           )}
           <a
             href={`https://maps.google.com/maps?q=${encodeURIComponent(order.pickup_address)}`}
@@ -149,7 +157,9 @@ const OrderCard = ({
         {order.customer?.address && (
           <div className="bg-emerald-50 rounded-xl p-3">
             <p className="text-xs font-bold text-emerald-700 mb-1">🏠 عنوان التوصيل</p>
-            <p className="text-gray-900 font-semibold leading-snug">{order.customer.address}</p>
+            <p className="text-gray-900 font-semibold leading-snug break-words whitespace-normal">
+              {order.customer.address}
+            </p>
             <a
               href={`https://maps.google.com/maps?q=${encodeURIComponent(order.customer.address)}`}
               target="_blank"

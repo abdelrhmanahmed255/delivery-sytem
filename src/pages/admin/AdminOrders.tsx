@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '../../api/orders';
 import { driversApi } from '../../api/drivers';
@@ -6,6 +6,7 @@ import { customersApi } from '../../api/customers';
 import { StatusBadge } from '../../components/StatusBadge';
 import { Pagination } from '../../components/Pagination';
 import { Modal } from '../../components/Modal';
+import { handlePhonePaste, normalizeIfPhoneLike, normalizeEgyptPhone } from '../../utils/phone';
 
 const ORDER_STATUSES = ['pending', 'offered', 'assigned', 'in_progress', 'completed', 'cancelled', 'expired'];
 const ETA_OPTIONS = [5,10,15, 30, 45, 60, 90, 120];
@@ -20,6 +21,14 @@ const STATUS_AR: Record<string, string> = {
   expired: 'منتهي',
 };
 
+// Get today's local-date boundaries [start, end) as ISO strings.
+const getTodayBoundsIso = () => {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+};
+
 export const AdminOrders = () => {
   const queryClient = useQueryClient();
   const [offset, setOffset] = useState(0);
@@ -30,13 +39,30 @@ export const AdminOrders = () => {
   const [showOffers, setShowOffers] = useState<number | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [assignDriverId, setAssignDriverId] = useState('');
+
+  // Date scope: by default show "today only"; toggle to view full history.
+  const [showAllDates, setShowAllDates] = useState(false);
+
+  // Order-page customer filter (search by name / phone → show all their orders).
+  const [orderCustomerSearch, setOrderCustomerSearch] = useState('');
+  const [orderCustomerFilter, setOrderCustomerFilter] = useState<any>(null);
+
+  // Available-drivers banner expand/collapse state.
+  const [driversBannerOpen, setDriversBannerOpen] = useState(false);
+
   const LIMIT = 20;
+  // When showing today only we fetch a wider window so the client-side
+  // filter still has access to most of the day's orders without pagination.
+  const TODAY_LIMIT = 200;
 
   const [form, setForm] = useState({
     customer_id: '', pickup_address: '', pickup_contact: '',
     package_description: '', price: '0',
     delivery_eta_minutes: '30', distribution_mode: 'auto' as 'auto' | 'manual',
   });
+  // Tracks whether the user manually edited pickup_address — used so the
+  // customer's name auto-fills the address only until the admin overrides it.
+  const [pickupAddressTouched, setPickupAddressTouched] = useState(false);
 
   // Inline customer search/create state
   const [customerSearch, setCustomerSearch] = useState('');
@@ -45,20 +71,45 @@ export const AdminOrders = () => {
   const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '', notes: '' });
   const [customerCreateError, setCustomerCreateError] = useState('');
 
+  // Today bounds recomputed on every render so a day rollover during a long
+  // open session is reflected automatically on the next refetch.
+  const today = getTodayBoundsIso();
+  // The active filter mode controls which list query runs and how pagination
+  // behaves. Customer filter wins (show all their orders, all dates).
+  const todayMode = !showAllDates && !orderCustomerFilter;
+
+  const listParams = useMemo(() => {
+    if (orderCustomerFilter) {
+      return { customer_id: orderCustomerFilter.id, status: filterStatus || undefined, limit: LIMIT, offset };
+    }
+    if (todayMode) {
+      return { status: filterStatus || undefined, from: today.start, to: today.end, limit: TODAY_LIMIT, offset: 0 };
+    }
+    return { status: filterStatus || undefined, limit: LIMIT, offset };
+  }, [orderCustomerFilter, todayMode, filterStatus, offset, today.start, today.end]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['orders', filterStatus, offset],
-    queryFn: () => ordersApi.list({ status: filterStatus || undefined, limit: LIMIT, offset }),
+    queryKey: ['orders', listParams],
+    queryFn: () => ordersApi.list(listParams),
   });
 
   const { data: driversData } = useQuery({
     queryKey: ['drivers-list-all'],
     queryFn: () => driversApi.list({ limit: 200 }),
+    refetchInterval: 30_000,
   });
 
   const { data: customerSearchResults } = useQuery({
     queryKey: ['customer-search', customerSearch],
-    queryFn: () => customersApi.list({ search: customerSearch, limit: 10 }),
+    queryFn: () => customersApi.list({ search: normalizeIfPhoneLike(customerSearch), limit: 10 }),
     enabled: customerSearch.trim().length > 1,
+  });
+
+  // Autocomplete for the orders-page customer filter.
+  const { data: orderCustomerResults } = useQuery({
+    queryKey: ['order-customer-search', orderCustomerSearch],
+    queryFn: () => customersApi.list({ search: normalizeIfPhoneLike(orderCustomerSearch), limit: 10 }),
+    enabled: orderCustomerSearch.trim().length > 1 && !orderCustomerFilter,
   });
 
   const { data: offersData } = useQuery({
@@ -70,15 +121,13 @@ export const AdminOrders = () => {
   const createCustomerMutation = useMutation({
     mutationFn: () => customersApi.create({
       full_name: newCustomer.full_name,
-      phone: newCustomer.phone,
+      phone: normalizeEgyptPhone(newCustomer.phone) || newCustomer.phone,
       address: newCustomer.address,
       notes: newCustomer.notes || undefined,
     }),
     onSuccess: (created: any) => {
-      setSelectedCustomer(created);
-      setForm(f => ({ ...f, customer_id: String(created.id) }));
+      pickCustomer(created);
       setShowCustomerCreate(false);
-      setCustomerSearch(created.full_name);
       setNewCustomer({ full_name: '', phone: '', address: '', notes: '' });
       setCustomerCreateError('');
     },
@@ -89,13 +138,13 @@ export const AdminOrders = () => {
     mutationFn: () => ordersApi.create({
       customer_id: Number(form.customer_id),
       pickup_address: form.pickup_address,
-      pickup_contact: form.pickup_contact || undefined,
+      pickup_contact: form.pickup_contact ? (normalizeEgyptPhone(form.pickup_contact) || form.pickup_contact) : undefined,
       package_description: form.package_description || undefined,
       price: form.price,
       delivery_eta_minutes: Number(form.delivery_eta_minutes),
       distribution_mode: form.distribution_mode,
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['orders'] }); setShowCreate(false); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['orders'] }); resetCreate(); },
   });
 
   const assignMutation = useMutation({
@@ -110,6 +159,19 @@ export const AdminOrders = () => {
 
   const activeDrivers = driversData?.items?.filter((d: any) => d.approval_status === 'approved' && d.is_available && d.is_active) ?? [];
 
+  // Selecting a customer (either from search or after inline create) also
+  // pre-fills the pickup address with the customer's name — many customers
+  // share an address with their own name, and the admin can still edit it.
+  const pickCustomer = (c: any) => {
+    setSelectedCustomer(c);
+    setForm(f => ({
+      ...f,
+      customer_id: String(c.id),
+      pickup_address: pickupAddressTouched && f.pickup_address ? f.pickup_address : c.full_name,
+    }));
+    setCustomerSearch(c.full_name);
+  };
+
   const resetCreate = () => {
     setForm({ customer_id: '', pickup_address: '', pickup_contact: '', package_description: '', price: '0', delivery_eta_minutes: '30', distribution_mode: 'auto' });
     setCustomerSearch('');
@@ -117,10 +179,31 @@ export const AdminOrders = () => {
     setShowCustomerCreate(false);
     setNewCustomer({ full_name: '', phone: '', address: '', notes: '' });
     setCustomerCreateError('');
+    setPickupAddressTouched(false);
     setShowCreate(false);
   };
 
   const searchResults = customerSearch.trim().length > 1 ? (customerSearchResults?.items ?? []) : [];
+  const orderCustomerOptions = orderCustomerSearch.trim().length > 1 ? (orderCustomerResults?.items ?? []) : [];
+
+  // Client-side guard for the today filter — if the backend doesn't honor the
+  // from/to params, we still cull anything outside today's window here.
+  const visibleOrders = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items: any[] = data?.items ?? [];
+    if (!todayMode) return items;
+    const startMs = new Date(today.start).getTime();
+    const endMs = new Date(today.end).getTime();
+    return items.filter((o) => {
+      const t = o.created_at ? new Date(o.created_at).getTime() : NaN;
+      return Number.isFinite(t) && t >= startMs && t < endMs;
+    });
+  }, [data, todayMode, today.start, today.end]);
+
+  const todayLabel = useMemo(
+    () => new Date(today.start).toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+    [today.start]
+  );
 
   return (
     <div className="space-y-6">
@@ -132,6 +215,145 @@ export const AdminOrders = () => {
         >
           + طلب جديد
         </button>
+      </div>
+
+      {/* Available drivers banner */}
+      <div className="bg-gradient-to-l from-emerald-50 via-green-50 to-white border border-emerald-100 rounded-xl shadow-sm overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setDriversBannerOpen(o => !o)}
+          className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-emerald-50/60 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <span className={`relative inline-flex h-3 w-3`}>
+              <span className={`absolute inline-flex h-full w-full rounded-full ${activeDrivers.length > 0 ? 'bg-emerald-400 opacity-75 animate-ping' : 'bg-gray-300'}`}></span>
+              <span className={`relative inline-flex h-3 w-3 rounded-full ${activeDrivers.length > 0 ? 'bg-emerald-500' : 'bg-gray-400'}`}></span>
+            </span>
+            <div className="text-right">
+              <p className="text-sm font-bold text-emerald-800">
+                المناديبون المتاحون: <span className="text-emerald-700">{activeDrivers.length}</span>
+              </p>
+              <p className="text-xs text-gray-500">
+                {activeDrivers.length === 0
+                  ? 'لا يوجد مندوب متاح حالياً لاستلام طلبات جديدة.'
+                  : 'جاهزون لاستلام الطلبات الآن.'}
+              </p>
+            </div>
+          </div>
+          <span className="text-emerald-700 text-xs font-semibold">
+            {driversBannerOpen ? 'إخفاء ▴' : 'عرض ▾'}
+          </span>
+        </button>
+        {driversBannerOpen && (
+          <div className="px-4 pb-4 pt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 border-t border-emerald-100">
+            {activeDrivers.length === 0 && (
+              <p className="text-sm text-gray-500 col-span-full py-3 text-center">
+                لا يوجد مندوب متاح حالياً.
+              </p>
+            )}
+            {activeDrivers.map((d: any) => (
+              <div
+                key={d.id}
+                className="flex items-center gap-2 bg-white border border-emerald-100 rounded-lg px-3 py-2"
+              >
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-800 truncate">{d.full_name}</p>
+                  <p className="text-xs text-gray-500 truncate" dir="ltr">{d.phone}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Search-by-customer + scope toggle */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex-1">
+            {orderCustomerFilter ? (
+              <div className="flex items-center justify-between bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                <div>
+                  <p className="text-xs text-indigo-700 font-medium">عرض كل طلبات العميل:</p>
+                  <p className="text-sm font-bold text-indigo-900">{orderCustomerFilter.full_name}</p>
+                  <p className="text-xs text-indigo-700" dir="ltr">{orderCustomerFilter.phone}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setOrderCustomerFilter(null); setOrderCustomerSearch(''); setOffset(0); }}
+                  className="text-xs text-red-600 hover:text-red-800 font-semibold"
+                >
+                  إزالة الفلتر ✕
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={orderCustomerSearch}
+                  onChange={e => setOrderCustomerSearch(e.target.value)}
+                  onPaste={handlePhonePaste(setOrderCustomerSearch)}
+                  placeholder="🔍 ابحث عن عميل (الاسم أو رقم الهاتف) لعرض كل طلباته..."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                />
+                {orderCustomerSearch.trim().length > 1 && (
+                  <div className="absolute z-20 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    {orderCustomerOptions.length > 0 ? (
+                      orderCustomerOptions.map((c: any) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { setOrderCustomerFilter(c); setOrderCustomerSearch(''); setOffset(0); }}
+                          className="w-full text-right px-3 py-2 hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                        >
+                          <p className="text-sm font-medium text-gray-800">{c.full_name}</p>
+                          <p className="text-xs text-gray-500" dir="ltr">{c.phone}</p>
+                          {c.address && <p className="text-xs text-gray-400 truncate">{c.address}</p>}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-3 py-3 text-sm text-gray-500">لا توجد نتائج لـ "{orderCustomerSearch}"</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {!orderCustomerFilter && (
+              <>
+                <span className="text-xs text-gray-500 whitespace-nowrap hidden sm:inline">
+                  {todayMode ? `📅 ${todayLabel}` : 'كل التواريخ'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setShowAllDates(s => !s); setOffset(0); }}
+                  className={`text-xs font-semibold px-3 py-2 rounded-lg border transition-colors whitespace-nowrap ${
+                    todayMode
+                      ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  {todayMode ? 'اليوم فقط ✓' : 'عرض اليوم فقط'}
+                </button>
+                {!todayMode && (
+                  <button
+                    type="button"
+                    onClick={() => { setShowAllDates(false); setOffset(0); }}
+                    className="text-xs font-medium px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
+                  >
+                    عودة لليوم
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        {todayMode && !orderCustomerFilter && (
+          <p className="text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 inline-block">
+            📅 يتم عرض طلبات اليوم فقط ({visibleOrders.length}). تنتقل القائمة تلقائياً لليوم التالي عند انتهاء اليوم الحالي.
+          </p>
+        )}
       </div>
 
       {/* Filters */}
@@ -158,8 +380,12 @@ export const AdminOrders = () => {
         {/* Mobile Card View */}
         <div className="md:hidden divide-y divide-gray-100">
           {isLoading && <p className="px-4 py-8 text-center text-gray-400">جارٍ تحميل الطلبات...</p>}
-          {!isLoading && data?.items?.length === 0 && <p className="px-4 py-8 text-center text-gray-400">لا توجد طلبات</p>}
-          {data?.items?.map((order: any) => (
+          {!isLoading && visibleOrders.length === 0 && (
+            <p className="px-4 py-8 text-center text-gray-400">
+              {todayMode ? `لا توجد طلبات بعد لـ ${todayLabel}` : 'لا توجد طلبات'}
+            </p>
+          )}
+          {visibleOrders.map((order: any) => (
             <div key={order.id} className="p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -203,10 +429,12 @@ export const AdminOrders = () => {
               {isLoading && (
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">جارٍ تحميل الطلبات...</td></tr>
               )}
-              {!isLoading && data?.items?.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">لا توجد طلبات</td></tr>
+              {!isLoading && visibleOrders.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                  {todayMode ? `لا توجد طلبات بعد لـ ${todayLabel}` : 'لا توجد طلبات'}
+                </td></tr>
               )}
-              {data?.items?.map((order: any) => (
+              {visibleOrders.map((order: any) => (
                 <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3">
                     <p className="text-sm font-semibold text-gray-800">{order.customer.full_name}</p>
@@ -255,7 +483,11 @@ export const AdminOrders = () => {
             </tbody>
           </table>
         </div>
-        {data && <div className="px-4 pb-4"><Pagination total={data.total} limit={LIMIT} offset={offset} onPageChange={setOffset} /></div>}
+        {data && !todayMode && (
+          <div className="px-4 pb-4">
+            <Pagination total={data.total} limit={LIMIT} offset={offset} onPageChange={setOffset} />
+          </div>
+        )}
       </div>
 
       {/* Create Order Modal */}
@@ -286,6 +518,7 @@ export const AdminOrders = () => {
                     type="text"
                     value={customerSearch}
                     onChange={e => { setCustomerSearch(e.target.value); setShowCustomerCreate(false); }}
+                    onPaste={handlePhonePaste(v => { setCustomerSearch(v); setShowCustomerCreate(false); })}
                     placeholder="ابحث بالاسم أو رقم الهاتف..."
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                   />
@@ -298,15 +531,11 @@ export const AdminOrders = () => {
                             <button
                               key={c.id}
                               type="button"
-                              onClick={() => {
-                                setSelectedCustomer(c);
-                                setForm(f => ({ ...f, customer_id: String(c.id) }));
-                                setCustomerSearch(c.full_name);
-                              }}
+                              onClick={() => pickCustomer(c)}
                               className="w-full text-right px-3 py-2 hover:bg-gray-50 border-b border-gray-50 last:border-0"
                             >
                               <p className="text-sm font-medium text-gray-800">{c.full_name}</p>
-                              <p className="text-xs text-gray-500">{c.phone}</p>
+                              <p className="text-xs text-gray-500" dir="ltr">{c.phone}</p>
                             </button>
                           ))}
                           <button
@@ -351,9 +580,15 @@ export const AdminOrders = () => {
                   type="tel"
                   value={newCustomer.phone}
                   onChange={e => setNewCustomer(n => ({ ...n, phone: e.target.value }))}
-                  placeholder="رقم الهاتف *"
+                  onPaste={handlePhonePaste(v => setNewCustomer(n => ({ ...n, phone: v })))}
+                  onBlur={e => {
+                    const v = normalizeEgyptPhone(e.target.value);
+                    if (v && v !== e.target.value) setNewCustomer(n => ({ ...n, phone: v }));
+                  }}
+                  placeholder="رقم الهاتف *  (مثال: 01XXXXXXXXX)"
                   required={showCustomerCreate}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
+                  dir="ltr"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 text-right"
                 />
                 <input
                   type="text"
@@ -398,12 +633,17 @@ export const AdminOrders = () => {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">عنوان الاستلام *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">عنوان الاستلام *</label>
+                {selectedCustomer && !pickupAddressTouched && (
+                  <span className="text-xs text-emerald-600 font-medium">↺ تلقائي من اسم العميل — يمكنك التعديل</span>
+                )}
+              </div>
               <input
                 required
                 type="text"
                 value={form.pickup_address}
-                onChange={e => setForm(f => ({ ...f, pickup_address: e.target.value }))}
+                onChange={e => { setForm(f => ({ ...f, pickup_address: e.target.value })); setPickupAddressTouched(true); }}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                 placeholder="مثال: شارع ٢٦ يوليو، الجيزة"
               />
@@ -414,8 +654,13 @@ export const AdminOrders = () => {
                 type="text"
                 value={form.pickup_contact}
                 onChange={e => setForm(f => ({ ...f, pickup_contact: e.target.value }))}
+                onPaste={handlePhonePaste(v => setForm(f => ({ ...f, pickup_contact: v })))}
+                onBlur={e => {
+                  const v = normalizeEgyptPhone(e.target.value);
+                  if (v && v !== e.target.value) setForm(f => ({ ...f, pickup_contact: v }));
+                }}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                placeholder="الاسم أو رقم الهاتف"
+                placeholder="الاسم أو رقم الهاتف (يدعم الصق من واتساب)"
               />
             </div>
             <div>

@@ -1,7 +1,15 @@
 import { apiClient } from './client';
 
 export const ordersApi = {
-  list: (params?: { status?: string; driver_id?: number; customer_id?: number; limit?: number; offset?: number }) =>
+  list: (params?: {
+    status?: string;
+    driver_id?: number;
+    customer_id?: number;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  }) =>
     apiClient.get('/admin/orders', { params }).then(r => r.data),
 
   get: (orderId: number) =>
