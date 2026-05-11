@@ -7,17 +7,21 @@ import { useAuthStore } from '../store/authStore';
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /**
- * After 30 minutes of zero user interaction, auto-disable availability and
- * close presence so the driver is removed from the offer pool. The UI
- * updates automatically because we invalidate the driverMe query.
+ * After 3 HOURS of genuine zero user interaction we auto-disable availability
+ * and close presence. Drivers regularly lock their phone screen or switch
+ * apps for long stretches while waiting for offers; they must NOT be kicked
+ * offline for that. The timer only fires after a real 3-hour idle window —
+ * see the wall-clock guard inside `goOfflineDueToInactivity`.
  *
  * NOTE: this is the ONLY automatic offline trigger from the frontend.
  * We intentionally do NOT close presence on refresh / tab close / route
  * change — the driver should stay online across page reloads. The backend
  * still has a stale-presence safety net (driver_presence_stale_seconds)
- * if the driver disappears without sending heartbeats.
+ * if the driver disappears without sending heartbeats, but we proactively
+ * re-open presence the moment the tab returns to the foreground so a
+ * locked phone screen never produces a lingering "offline" state.
  */
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const INACTIVITY_TIMEOUT_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 /** DOM events that count as "user is interacting" — covers both desktop and mobile */
 const ACTIVITY_EVENTS = [
@@ -32,6 +36,11 @@ export function useDriverPresence() {
 
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Wall-clock timestamp of the last real user activity / visibility-resume.
+  // Used to defend against `setTimeout` firing immediately when a mobile tab
+  // wakes up after the OS suspended it (the queued timer can fire all at once
+  // even though no real idle time elapsed in our app while suspended).
+  const lastActivityAtRef = useRef<number>(Date.now());
 
   useEffect(() => {
     if (!token) return;
@@ -47,6 +56,17 @@ export function useDriverPresence() {
     };
 
     const goOfflineDueToInactivity = async () => {
+      // Wall-clock guard: NEVER take the driver offline unless a full
+      // INACTIVITY_TIMEOUT_MS of real time has elapsed since the last
+      // recorded activity. If a backgrounded mobile tab resumes and the
+      // queued timer fires early, we just reschedule for the remainder.
+      const idleFor = Date.now() - lastActivityAtRef.current;
+      if (idleFor < INACTIVITY_TIMEOUT_MS) {
+        const remaining = INACTIVITY_TIMEOUT_MS - idleFor;
+        if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+        inactivityTimerRef.current = setTimeout(goOfflineDueToInactivity, remaining);
+        return;
+      }
       try {
         // Disable availability first so backend removes driver from offer pool
         await driversApi.setAvailability(false);
@@ -60,6 +80,7 @@ export function useDriverPresence() {
     };
 
     const resetInactivityTimer = () => {
+      lastActivityAtRef.current = Date.now();
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
       inactivityTimerRef.current = setTimeout(goOfflineDueToInactivity, INACTIVITY_TIMEOUT_MS);
     };
@@ -81,8 +102,22 @@ export function useDriverPresence() {
     );
 
     // ── 4. Visibility change ─────────────────────────────────────────────────
+    // When the tab becomes visible again (phone unlocked, app returned to
+    // foreground after multitasking, etc.) mobile browsers will have paused
+    // our heartbeat interval, so the backend almost certainly considers the
+    // driver stale by now. We immediately re-open the presence session to
+    // restore presence_status=online_idle and refresh last_seen_at, then
+    // invalidate the cached profile so the UI flips back to online without
+    // the user having to refresh.
     const handleVisibilityChange = () => {
-      sendHeartbeat(document.visibilityState === 'visible');
+      if (document.visibilityState === 'visible') {
+        resetInactivityTimer();
+        driversApi.presenceOpen().catch(() => {});
+        queryClient.invalidateQueries({ queryKey: ['driverMe'] });
+      } else {
+        // App going to background — tell backend we're still here but idle.
+        sendHeartbeat(false);
+      }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -103,4 +138,3 @@ export function useDriverPresence() {
     };
   }, [token, queryClient]);
 }
-
