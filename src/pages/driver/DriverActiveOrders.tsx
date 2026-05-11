@@ -73,15 +73,18 @@ const OrderCard = ({
                 'bg-red-50 border-red-200';
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+    <article
+      className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden"
+      aria-label={`طلب رقم ${order.code}، الحالة ${order.status}`}
+    >
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <div>
-          <p className="text-xs text-gray-400">كود الطلب</p>
-          <p className="font-mono font-black text-gray-900 text-lg tracking-wide">{order.code}</p>
+          <p className="text-sm font-semibold text-gray-500">كود الطلب</p>
+          <p className="font-mono font-black text-gray-900 text-xl tracking-wide">{order.code}</p>
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={order.status} />
-          <span className="bg-green-100 text-green-800 font-black px-3 py-1.5 rounded-xl text-base">
+          <span className="bg-green-100 text-green-800 font-black px-3 py-1.5 rounded-xl text-lg">
             {order.price} ج.م
           </span>
         </div>
@@ -89,14 +92,19 @@ const OrderCard = ({
 
       <div className="p-4 space-y-3">
         {order.status === 'in_progress' && timeLeft !== null && (
-          <div className={`rounded-2xl border-2 p-4 text-center ${timerBg} ${pct <= 0.2 ? 'animate-pulse' : ''}`}>
-            <p className="text-xs font-bold text-gray-500 mb-1">⏱ الوقت المتبقي للتسليم</p>
-            <p className={`text-6xl font-black tabular-nums tracking-wider ${timerColor}`}>
+          <div
+            className={`rounded-2xl border-2 p-4 text-center ${timerBg} ${pct <= 0.2 ? 'animate-pulse' : ''}`}
+            role="timer"
+            aria-live="polite"
+            aria-label={`الوقت المتبقي للتسليم: ${formatTime(timeLeft)}`}
+          >
+            <p className="text-sm font-bold text-gray-600 mb-1">⏱ الوقت المتبقي للتسليم</p>
+            <p className={`text-7xl font-black tabular-nums tracking-wider ${timerColor}`}>
               {formatTime(timeLeft)}
             </p>
-            <p className="text-xs text-gray-400 mt-1">من أصل {order.delivery_eta_minutes} دقيقة</p>
+            <p className="text-sm text-gray-500 mt-1">من أصل {order.delivery_eta_minutes} دقيقة</p>
             {timeLeft === 0 && (
-              <p className="text-sm text-red-600 font-black mt-2">
+              <p className="text-base text-red-600 font-black mt-2">
                 ⚠️ انتهى الوقت — جارٍ إنهاء الطلب تلقائياً
               </p>
             )}
@@ -105,42 +113,42 @@ const OrderCard = ({
 
         {order.status === 'assigned' && (
           <div className="bg-blue-50 rounded-2xl p-4 flex items-center gap-3">
-            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" aria-hidden="true" />
             <div>
-              <p className="font-bold text-blue-800">
+              <p className="font-bold text-blue-800 text-lg">
                 {isPickingUp ? 'جارٍ بدء التوصيل...' : 'تم قبول الطلب'}
               </p>
-              <p className="text-sm text-blue-500">سيبدأ العداد تلقائياً</p>
+              <p className="text-base text-blue-500">سيبدأ العداد تلقائياً</p>
             </div>
           </div>
         )}
 
         <div className="flex items-start justify-between bg-gray-50 rounded-xl p-3 gap-3">
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-gray-400">العميل</p>
-            <p className="font-black text-gray-900 break-words whitespace-normal leading-snug">
+            <p className="text-sm font-bold text-gray-500">العميل</p>
+            <p className="text-xl font-black text-gray-900 break-words whitespace-normal leading-snug">
               {order.customer.full_name}
             </p>
-            <p className="text-sm text-gray-500 break-words whitespace-normal" dir="ltr">
+            <p className="text-base text-gray-600 break-words whitespace-normal" dir="ltr">
               {order.customer.phone}
             </p>
           </div>
           <a
             href={`tel:${order.customer.phone}`}
-            className="flex-shrink-0 w-14 h-14 bg-green-500 active:bg-green-600 text-white rounded-full flex items-center justify-center shadow-md text-2xl transition-transform active:scale-95"
-            aria-label="اتصال بالعميل"
+            className="flex-shrink-0 w-16 h-16 bg-green-500 active:bg-green-600 text-white rounded-full flex items-center justify-center shadow-md text-3xl transition-transform active:scale-95"
+            aria-label={`اتصال بالعميل ${order.customer.full_name} على الرقم ${order.customer.phone}`}
           >
-            📞
+            <span aria-hidden="true">📞</span>
           </a>
         </div>
 
         <div className="bg-blue-50 rounded-xl p-3">
-          <p className="text-xs font-bold text-blue-700 mb-1">📍 نقطة الاستلام</p>
-          <p className="text-gray-900 font-semibold leading-snug break-words whitespace-normal">
+          <p className="text-sm font-bold text-blue-700 mb-1">📍 نقطة الاستلام</p>
+          <p className="text-lg text-gray-900 font-bold leading-snug break-words whitespace-normal">
             {order.pickup_address}
           </p>
           {order.pickup_contact && (
-            <p className="text-xs text-gray-500 mt-1 break-words whitespace-normal">
+            <p className="text-sm text-gray-600 mt-1 break-words whitespace-normal">
               جهة الاتصال: {order.pickup_contact}
             </p>
           )}
@@ -148,33 +156,37 @@ const OrderCard = ({
             href={`https://maps.google.com/maps?q=${encodeURIComponent(order.pickup_address)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 mt-2.5 bg-blue-600 active:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-xl transition-transform active:scale-95"
+            className="inline-flex items-center gap-1.5 mt-2.5 bg-blue-600 active:bg-blue-700 text-white text-base font-bold px-4 py-2.5 rounded-xl transition-transform active:scale-95"
+            aria-label={`فتح خريطة لعنوان الاستلام: ${order.pickup_address}`}
           >
-            🗺️ فتح الخريطة
+            <span aria-hidden="true">🗺️</span> فتح الخريطة
           </a>
         </div>
 
         {order.customer?.address && (
           <div className="bg-emerald-50 rounded-xl p-3">
-            <p className="text-xs font-bold text-emerald-700 mb-1">🏠 عنوان التوصيل</p>
-            <p className="text-gray-900 font-semibold leading-snug break-words whitespace-normal">
+            <p className="text-sm font-bold text-emerald-700 mb-1">🏠 عنوان التوصيل</p>
+            <p className="text-lg text-gray-900 font-bold leading-snug break-words whitespace-normal">
               {order.customer.address}
             </p>
             <a
               href={`https://maps.google.com/maps?q=${encodeURIComponent(order.customer.address)}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 mt-2.5 bg-emerald-600 active:bg-emerald-700 text-white text-sm font-bold px-4 py-2 rounded-xl transition-transform active:scale-95"
+              className="inline-flex items-center gap-1.5 mt-2.5 bg-emerald-600 active:bg-emerald-700 text-white text-base font-bold px-4 py-2.5 rounded-xl transition-transform active:scale-95"
+              aria-label={`فتح خريطة لعنوان التوصيل: ${order.customer.address}`}
             >
-              🗺️ فتح الخريطة
+              <span aria-hidden="true">🗺️</span> فتح الخريطة
             </a>
           </div>
         )}
 
         {order.package_description && (
           <div className="bg-orange-50 rounded-xl p-3">
-            <p className="text-xs font-bold text-orange-600 mb-1">📦 محتوى الطرد</p>
-            <p className="text-gray-800">{order.package_description}</p>
+            <p className="text-sm font-bold text-orange-700 mb-1">📦 محتوى الطرد</p>
+            <p className="text-lg text-gray-800 break-words whitespace-pre-wrap leading-relaxed">
+              {order.package_description}
+            </p>
           </div>
         )}
       </div>
@@ -187,13 +199,14 @@ const OrderCard = ({
               onComplete(order.id);
             }}
             disabled={isCompleting}
-            className="w-full bg-green-500 active:bg-green-700 text-white font-black py-5 rounded-2xl text-xl shadow-md transition-transform active:scale-[0.98] disabled:opacity-60"
+            aria-label="تأكيد تسليم الطلب للعميل"
+            className="w-full bg-green-500 active:bg-green-700 text-white font-black py-5 rounded-2xl text-2xl shadow-md transition-transform active:scale-[0.98] disabled:opacity-60"
           >
             {isCompleting ? '⏳ جارٍ التأكيد...' : '✅ تم التسليم بنجاح'}
           </button>
         </div>
       )}
-    </div>
+    </article>
   );
 };
 

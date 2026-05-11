@@ -11,6 +11,7 @@ import { DriverLayout } from './components/DriverLayout';
 
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminOrders } from './pages/admin/AdminOrders';
+import { AdminOrdersArchive } from './pages/admin/AdminOrdersArchive';
 import { AdminDrivers } from './pages/admin/AdminDrivers';
 import { AdminCustomers } from './pages/admin/AdminCustomers';
 import { AdminActivity } from './pages/admin/AdminActivity';
@@ -42,6 +43,7 @@ function App() {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<AdminDashboard />} />
               <Route path="orders" element={<AdminOrders />} />
+              <Route path="orders/archive" element={<AdminOrdersArchive />} />
               <Route path="drivers" element={<AdminDrivers />} />
               <Route path="customers" element={<AdminCustomers />} />
               <Route path="shifts" element={<AdminShifts />} />

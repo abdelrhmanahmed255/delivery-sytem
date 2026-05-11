@@ -1,11 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { driversApi } from '../../api/drivers';
 import { apiClient } from '../../api/client';
+import {
+  ensureNotificationPermission,
+  getNotificationPermission,
+  isPushSupported,
+  showOfferNotification,
+} from '../../utils/notifications';
 
 export const DriverHome = () => {
   const queryClient = useQueryClient();
   const [openedOffer, setOpenedOffer] = useState<any>(null);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => getNotificationPermission());
+  const lastNotifiedOfferIdRef = useRef<number | null>(null);
 
   const { data: me } = useQuery({
     queryKey: ['driverMe'],
@@ -17,7 +25,33 @@ export const DriverHome = () => {
     queryKey: ['currentOffer'],
     queryFn: () => apiClient.get('/driver/orders/current-offer').then(r => r.data),
     refetchInterval: 8000,
+    // Keep polling even when the tab is in the background — the whole point
+    // of notifications is to alert the driver while they're not looking.
+    refetchIntervalInBackground: true,
   });
+
+  // When a new offer arrives (transitions from "no offer" to "have offer", or
+  // the offer's id changes), fire an Android system-tray notification. We
+  // track the last-notified id so we don't re-notify on every poll for the
+  // same offer.
+  useEffect(() => {
+    if (!offerSummary) return;
+    const incomingId: number | undefined =
+      offerSummary?.id ?? offerSummary?.offer_id ?? offerSummary?.order_offer_id;
+    if (!incomingId || incomingId === lastNotifiedOfferIdRef.current) return;
+    lastNotifiedOfferIdRef.current = incomingId;
+    const price = offerSummary?.price ?? offerSummary?.order?.price;
+    const area =
+      offerSummary?.customer?.address ?? offerSummary?.order?.customer?.address ?? '';
+    showOfferNotification({
+      title: '🔔 طلب توصيل جديد!',
+      body: price
+        ? `المبلغ ${price} ج.م${area ? ` — ${area}` : ''} — اضغط لعرض التفاصيل`
+        : 'لديك عرض توصيل جديد — اضغط لعرض التفاصيل',
+      tag: `driver-offer-${incomingId}`,
+      url: '/driver/home',
+    });
+  }, [offerSummary]);
 
   const availabilityMutation = useMutation({
     mutationFn: (val: boolean) => driversApi.setAvailability(val),
@@ -55,8 +89,53 @@ export const DriverHome = () => {
 
   const offerOrder = openedOffer?.order ?? openedOffer;
 
+  const requestNotifications = async () => {
+    const result = await ensureNotificationPermission();
+    setNotifPerm(result);
+  };
+
   return (
     <div className="p-4 space-y-4 max-w-lg mx-auto">
+      {/* ── Enable Android system notifications banner ──── */}
+      {isPushSupported() && notifPerm !== 'granted' && (
+        <div
+          className={`rounded-2xl p-4 border-2 ${
+            notifPerm === 'denied'
+              ? 'bg-orange-50 border-orange-200'
+              : 'bg-blue-50 border-blue-200'
+          }`}
+          role="status"
+        >
+          <div className="flex items-start gap-3">
+            <span className="text-3xl" aria-hidden="true">🔔</span>
+            <div className="flex-1 min-w-0">
+              <p className={`font-black text-base ${
+                notifPerm === 'denied' ? 'text-orange-800' : 'text-blue-800'
+              }`}>
+                {notifPerm === 'denied'
+                  ? 'تنبيهات الطلبات معطّلة'
+                  : 'فعِّل تنبيهات الطلبات'}
+              </p>
+              <p className={`text-sm mt-1 ${
+                notifPerm === 'denied' ? 'text-orange-700' : 'text-blue-700'
+              }`}>
+                {notifPerm === 'denied'
+                  ? 'لن يصلك صوت / إشعار عند وصول طلب جديد. فعِّلها من إعدادات المتصفح للموقع.'
+                  : 'احصل على تنبيه في شريط إشعارات الأندرويد فور وصول طلب — حتى لو كان التطبيق في الخلفية.'}
+              </p>
+              {notifPerm === 'default' && (
+                <button
+                  onClick={requestNotifications}
+                  className="mt-3 bg-blue-600 active:bg-blue-700 text-white font-bold text-sm px-4 py-2 rounded-xl active:scale-95"
+                >
+                  ✅ تفعيل التنبيهات
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Availability toggle ─────────────────────────── */}
       <button
         onClick={() => !isRestricted && availabilityMutation.mutate(!isAvailable)}
@@ -99,31 +178,33 @@ export const DriverHome = () => {
           <div className="p-4 space-y-3">
             {/* Pickup */}
             <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-              <p className="text-xs font-bold text-blue-600 mb-1">📍 نقطة الاستلام</p>
-              <p className="text-gray-900 font-bold leading-snug">{offerOrder.pickup_address}</p>
+              <p className="text-sm font-bold text-blue-700 mb-1">📍 نقطة الاستلام</p>
+              <p className="text-lg text-gray-900 font-bold leading-snug break-words whitespace-pre-wrap">{offerOrder.pickup_address}</p>
               {offerOrder.pickup_contact && (
-                <p className="text-sm text-gray-500 mt-1">جهة الاتصال: {offerOrder.pickup_contact}</p>
+                <p className="text-base text-gray-600 mt-1">جهة الاتصال: {offerOrder.pickup_contact}</p>
               )}
               <a
                 href={`https://maps.google.com/maps?q=${encodeURIComponent(offerOrder.pickup_address)}`}
                 target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 mt-3 bg-blue-600 text-white text-sm font-bold px-4 py-2 rounded-xl active:scale-95"
+                aria-label={`فتح خريطة لعنوان الاستلام: ${offerOrder.pickup_address}`}
+                className="inline-flex items-center gap-2 mt-3 bg-blue-600 text-white text-base font-bold px-4 py-2.5 rounded-xl active:scale-95"
               >
-                🗺️ افتح الخريطة
+                <span aria-hidden="true">🗺️</span> افتح الخريطة
               </a>
             </div>
 
             {/* Delivery area */}
             {offerOrder.customer?.address && (
               <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-                <p className="text-xs font-bold text-emerald-600 mb-1">🏠 منطقة التوصيل</p>
-                <p className="text-gray-900 font-semibold">{offerOrder.customer.address}</p>
+                <p className="text-sm font-bold text-emerald-700 mb-1">🏠 منطقة التوصيل</p>
+                <p className="text-lg text-gray-900 font-bold break-words whitespace-pre-wrap leading-snug">{offerOrder.customer.address}</p>
                 <a
                   href={`https://maps.google.com/maps?q=${encodeURIComponent(offerOrder.customer.address)}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 mt-3 bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl active:scale-95"
+                  aria-label={`فتح خريطة لمنطقة التوصيل: ${offerOrder.customer.address}`}
+                  className="inline-flex items-center gap-2 mt-3 bg-emerald-600 text-white text-base font-bold px-4 py-2.5 rounded-xl active:scale-95"
                 >
-                  🗺️ افتح الخريطة
+                  <span aria-hidden="true">🗺️</span> افتح الخريطة
                 </a>
               </div>
             )}
@@ -131,8 +212,8 @@ export const DriverHome = () => {
             {/* Package */}
             {offerOrder.package_description && (
               <div className="bg-orange-50 border border-orange-100 rounded-2xl p-4">
-                <p className="text-xs font-bold text-orange-600 mb-1">📦 محتوى الطرد</p>
-                <p className="text-gray-800">{offerOrder.package_description}</p>
+                <p className="text-sm font-bold text-orange-700 mb-1">📦 محتوى الطرد</p>
+                <p className="text-lg text-gray-800 break-words whitespace-pre-wrap leading-relaxed">{offerOrder.package_description}</p>
               </div>
             )}
           </div>

@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '../../api/orders';
 import { driversApi } from '../../api/drivers';
 import { customersApi } from '../../api/customers';
 import { StatusBadge } from '../../components/StatusBadge';
-import { Pagination } from '../../components/Pagination';
 import { Modal } from '../../components/Modal';
+import { OrderDetailsModal } from '../../components/OrderDetailsModal';
 import { handlePhonePaste, normalizeIfPhoneLike, normalizeEgyptPhone } from '../../utils/phone';
 
 const ORDER_STATUSES = ['pending', 'offered', 'assigned', 'in_progress', 'completed', 'cancelled', 'expired'];
@@ -31,28 +32,25 @@ const getTodayBoundsIso = () => {
 
 export const AdminOrders = () => {
   const queryClient = useQueryClient();
-  const [offset, setOffset] = useState(0);
+  const navigate = useNavigate();
   const [filterStatus, setFilterStatus] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showAssign, setShowAssign] = useState<number | null>(null);
   const [showCancel, setShowCancel] = useState<number | null>(null);
   const [showOffers, setShowOffers] = useState<number | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [showDetails, setShowDetails] = useState<any | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [assignDriverId, setAssignDriverId] = useState('');
 
-  // Date scope: by default show "today only"; toggle to view full history.
-  const [showAllDates, setShowAllDates] = useState(false);
-
-  // Order-page customer filter (search by name / phone → show all their orders).
+  // Quick on-page customer narrow-down (filters the already-loaded today list).
   const [orderCustomerSearch, setOrderCustomerSearch] = useState('');
-  const [orderCustomerFilter, setOrderCustomerFilter] = useState<any>(null);
 
   // Available-drivers banner expand/collapse state.
   const [driversBannerOpen, setDriversBannerOpen] = useState(false);
 
-  const LIMIT = 20;
-  // When showing today only we fetch a wider window so the client-side
-  // filter still has access to most of the day's orders without pagination.
+  // Today's orders are fetched with a wide window so client-side narrowing
+  // (status / customer search) has access to the full day without paging.
   const TODAY_LIMIT = 200;
 
   const [form, setForm] = useState({
@@ -74,23 +72,25 @@ export const AdminOrders = () => {
   // Today bounds recomputed on every render so a day rollover during a long
   // open session is reflected automatically on the next refetch.
   const today = getTodayBoundsIso();
-  // The active filter mode controls which list query runs and how pagination
-  // behaves. Customer filter wins (show all their orders, all dates).
-  const todayMode = !showAllDates && !orderCustomerFilter;
 
-  const listParams = useMemo(() => {
-    if (orderCustomerFilter) {
-      return { customer_id: orderCustomerFilter.id, status: filterStatus || undefined, limit: LIMIT, offset };
-    }
-    if (todayMode) {
-      return { status: filterStatus || undefined, from: today.start, to: today.end, limit: TODAY_LIMIT, offset: 0 };
-    }
-    return { status: filterStatus || undefined, limit: LIMIT, offset };
-  }, [orderCustomerFilter, todayMode, filterStatus, offset, today.start, today.end]);
+  // This page is strictly the "today" live view — full history lives on the
+  // archive page. We send from/to to the backend and also enforce the window
+  // client-side in case the backend ignores the params.
+  const listParams = useMemo(
+    () => ({
+      status: filterStatus || undefined,
+      from: today.start,
+      to: today.end,
+      limit: TODAY_LIMIT,
+      offset: 0,
+    }),
+    [filterStatus, today.start, today.end]
+  );
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ['orders', listParams],
     queryFn: () => ordersApi.list(listParams),
+    refetchInterval: 15_000,
   });
 
   const { data: driversData } = useQuery({
@@ -103,13 +103,6 @@ export const AdminOrders = () => {
     queryKey: ['customer-search', customerSearch],
     queryFn: () => customersApi.list({ search: normalizeIfPhoneLike(customerSearch), limit: 10 }),
     enabled: customerSearch.trim().length > 1,
-  });
-
-  // Autocomplete for the orders-page customer filter.
-  const { data: orderCustomerResults } = useQuery({
-    queryKey: ['order-customer-search', orderCustomerSearch],
-    queryFn: () => customersApi.list({ search: normalizeIfPhoneLike(orderCustomerSearch), limit: 10 }),
-    enabled: orderCustomerSearch.trim().length > 1 && !orderCustomerFilter,
   });
 
   const { data: offersData } = useQuery({
@@ -144,17 +137,60 @@ export const AdminOrders = () => {
       delivery_eta_minutes: Number(form.delivery_eta_minutes),
       distribution_mode: form.distribution_mode,
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['orders'] }); resetCreate(); },
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ['orders'] });
+      resetCreate();
+    },
   });
 
+  // Assign and cancel both use optimistic updates so the row reflects the
+  // new state instantly — no more "looks frozen" while the server responds.
+  // We then refetch in the background to reconcile with the server.
   const assignMutation = useMutation({
     mutationFn: () => ordersApi.assign(showAssign!, Number(assignDriverId)),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['orders'] }); setShowAssign(null); },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['orders'] });
+      const previous = queryClient.getQueriesData({ queryKey: ['orders'] });
+      const driver = activeDrivers.find((d: any) => d.id === Number(assignDriverId));
+      queryClient.setQueriesData({ queryKey: ['orders'] }, (old: any) => {
+        if (!old?.items) return old;
+        return {
+          ...old,
+          items: old.items.map((o: any) =>
+            o.id === showAssign ? { ...o, status: 'assigned', assigned_driver: driver ?? o.assigned_driver } : o
+          ),
+        };
+      });
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      context?.previous?.forEach(([key, value]: any) => queryClient.setQueryData(key, value));
+    },
+    onSettled: () => { queryClient.invalidateQueries({ queryKey: ['orders'] }); },
+    onSuccess: () => { setShowAssign(null); setAssignDriverId(''); },
   });
 
   const cancelMutation = useMutation({
     mutationFn: () => ordersApi.cancel(showCancel!, cancelReason || undefined),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['orders'] }); setShowCancel(null); setCancelReason(''); },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['orders'] });
+      const previous = queryClient.getQueriesData({ queryKey: ['orders'] });
+      queryClient.setQueriesData({ queryKey: ['orders'] }, (old: any) => {
+        if (!old?.items) return old;
+        return {
+          ...old,
+          items: old.items.map((o: any) =>
+            o.id === showCancel ? { ...o, status: 'cancelled' } : o
+          ),
+        };
+      });
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      context?.previous?.forEach(([key, value]: any) => queryClient.setQueryData(key, value));
+    },
+    onSettled: () => { queryClient.invalidateQueries({ queryKey: ['orders'] }); },
+    onSuccess: () => { setShowCancel(null); setCancelReason(''); },
   });
 
   const activeDrivers = driversData?.items?.filter((d: any) => d.approval_status === 'approved' && d.is_available && d.is_active) ?? [];
@@ -184,37 +220,76 @@ export const AdminOrders = () => {
   };
 
   const searchResults = customerSearch.trim().length > 1 ? (customerSearchResults?.items ?? []) : [];
-  const orderCustomerOptions = orderCustomerSearch.trim().length > 1 ? (orderCustomerResults?.items ?? []) : [];
 
-  // Client-side guard for the today filter — if the backend doesn't honor the
-  // from/to params, we still cull anything outside today's window here.
+  // Strict client-side guard: even if the backend ignores from/to we cull
+  // anything outside today's local window here, plus apply the on-page
+  // customer narrow-down (name / phone substring match).
   const visibleOrders = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items: any[] = data?.items ?? [];
-    if (!todayMode) return items;
     const startMs = new Date(today.start).getTime();
     const endMs = new Date(today.end).getTime();
+    const q = orderCustomerSearch.trim().toLowerCase();
+    const normalized = q ? normalizeIfPhoneLike(q).toLowerCase() : '';
     return items.filter((o) => {
       const t = o.created_at ? new Date(o.created_at).getTime() : NaN;
-      return Number.isFinite(t) && t >= startMs && t < endMs;
+      if (!Number.isFinite(t) || t < startMs || t >= endMs) return false;
+      if (!q) return true;
+      const name = (o.customer?.full_name ?? '').toLowerCase();
+      const phone = (o.customer?.phone ?? '').toLowerCase();
+      return name.includes(q) || phone.includes(q) || phone.includes(normalized);
     });
-  }, [data, todayMode, today.start, today.end]);
+  }, [data, today.start, today.end, orderCustomerSearch]);
 
   const todayLabel = useMemo(
     () => new Date(today.start).toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
     [today.start]
   );
 
+  const lastUpdatedLabel = dataUpdatedAt > 0
+    ? new Date(dataUpdatedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '';
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-bold text-gray-800">الطلبات</h2>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
-        >
-          + طلب جديد
-        </button>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">طلبات اليوم</h2>
+          <p className="text-xs text-gray-500 mt-0.5">📅 {todayLabel}</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {lastUpdatedLabel && (
+            <span className="text-xs text-gray-400 hidden sm:inline">
+              آخر تحديث: {lastUpdatedLabel}
+            </span>
+          )}
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            title="تحديث القائمة بدون إعادة تحميل الصفحة"
+            className={`flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-lg border transition-colors ${
+              isFetching
+                ? 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            <span className={isFetching ? 'animate-spin inline-block' : 'inline-block'}>↻</span>
+            {isFetching ? 'جارٍ...' : 'تحديث'}
+          </button>
+          <button
+            onClick={() => navigate('/admin/orders/archive')}
+            title="عرض كل الطلبات السابقة"
+            className="flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-lg border bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 transition-colors"
+          >
+            📋 كل الطلبات
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+          >
+            + طلب جديد
+          </button>
+        </div>
       </div>
 
       {/* Available drivers banner */}
@@ -267,102 +342,37 @@ export const AdminOrders = () => {
         )}
       </div>
 
-      {/* Search-by-customer + scope toggle */}
-      <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex-1">
-            {orderCustomerFilter ? (
-              <div className="flex items-center justify-between bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
-                <div>
-                  <p className="text-xs text-indigo-700 font-medium">عرض كل طلبات العميل:</p>
-                  <p className="text-sm font-bold text-indigo-900">{orderCustomerFilter.full_name}</p>
-                  <p className="text-xs text-indigo-700" dir="ltr">{orderCustomerFilter.phone}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setOrderCustomerFilter(null); setOrderCustomerSearch(''); setOffset(0); }}
-                  className="text-xs text-red-600 hover:text-red-800 font-semibold"
-                >
-                  إزالة الفلتر ✕
-                </button>
-              </div>
-            ) : (
-              <div className="relative">
-                <input
-                  type="text"
-                  value={orderCustomerSearch}
-                  onChange={e => setOrderCustomerSearch(e.target.value)}
-                  onPaste={handlePhonePaste(setOrderCustomerSearch)}
-                  placeholder="🔍 ابحث عن عميل (الاسم أو رقم الهاتف) لعرض كل طلباته..."
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                />
-                {orderCustomerSearch.trim().length > 1 && (
-                  <div className="absolute z-20 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                    {orderCustomerOptions.length > 0 ? (
-                      orderCustomerOptions.map((c: any) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => { setOrderCustomerFilter(c); setOrderCustomerSearch(''); setOffset(0); }}
-                          className="w-full text-right px-3 py-2 hover:bg-gray-50 border-b border-gray-50 last:border-0"
-                        >
-                          <p className="text-sm font-medium text-gray-800">{c.full_name}</p>
-                          <p className="text-xs text-gray-500" dir="ltr">{c.phone}</p>
-                          {c.address && <p className="text-xs text-gray-400 truncate">{c.address}</p>}
-                        </button>
-                      ))
-                    ) : (
-                      <p className="px-3 py-3 text-sm text-gray-500">لا توجد نتائج لـ "{orderCustomerSearch}"</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {!orderCustomerFilter && (
-              <>
-                <span className="text-xs text-gray-500 whitespace-nowrap hidden sm:inline">
-                  {todayMode ? `📅 ${todayLabel}` : '📚 عرض كامل السجل'}
-                </span>
-                {todayMode ? (
-                  // Default view: today only. One button to switch to all-time history.
-                  <button
-                    type="button"
-                    onClick={() => { setShowAllDates(true); setOffset(0); }}
-                    className="text-xs font-semibold px-3 py-2 rounded-lg border bg-white text-gray-700 border-gray-200 hover:bg-gray-50 transition-colors whitespace-nowrap"
-                    title="عرض جميع الطلبات السابقة"
-                  >
-                    📋 عرض كل الطلبات
-                  </button>
-                ) : (
-                  // History view: one button to return to today's auto-rolling list.
-                  <button
-                    type="button"
-                    onClick={() => { setShowAllDates(false); setOffset(0); }}
-                    className="text-xs font-semibold px-3 py-2 rounded-lg border bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 transition-colors whitespace-nowrap"
-                    title="العودة لعرض طلبات اليوم تلقائياً"
-                  >
-                    📅 عرض اليوم فقط
-                  </button>
-                )}
-              </>
-            )}
-          </div>
+      {/* On-page narrow-down: search within today's orders by name / phone */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 space-y-2">
+        <div className="relative">
+          <input
+            type="text"
+            value={orderCustomerSearch}
+            onChange={e => setOrderCustomerSearch(e.target.value)}
+            onPaste={handlePhonePaste(setOrderCustomerSearch)}
+            placeholder="🔍 ابحث ضمن طلبات اليوم (الاسم أو رقم الهاتف)..."
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+          {orderCustomerSearch && (
+            <button
+              type="button"
+              onClick={() => setOrderCustomerSearch('')}
+              className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 text-xs font-bold px-2"
+              title="مسح البحث"
+            >
+              ✕
+            </button>
+          )}
         </div>
-        {!orderCustomerFilter && (
-          <p className={`text-xs rounded-lg px-3 py-1.5 inline-block ${todayMode ? 'text-emerald-700 bg-emerald-50' : 'text-gray-600 bg-gray-50'}`}>
-            {todayMode
-              ? `📅 يتم عرض طلبات اليوم فقط (${visibleOrders.length}). تنتقل القائمة تلقائياً لليوم التالي عند انتهاء اليوم الحالي.`
-              : `📚 يتم عرض كامل سجل الطلبات${data ? ` (${data.total} طلب)` : ''}. اضغط "عرض اليوم فقط" للعودة لعرض اليوم.`}
-          </p>
-        )}
+        <p className="text-xs rounded-lg px-3 py-1.5 inline-block text-emerald-700 bg-emerald-50">
+          📅 يتم عرض طلبات اليوم فقط ({visibleOrders.length}{data && visibleOrders.length !== (data.items?.length ?? 0) ? ` من ${data.items?.length ?? 0}` : ''}). تنتقل القائمة تلقائياً لليوم التالي عند انتهاء اليوم.
+        </p>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => { setFilterStatus(''); setOffset(0); }}
+          onClick={() => setFilterStatus('')}
           className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${!filterStatus ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
         >
           الكل
@@ -370,7 +380,7 @@ export const AdminOrders = () => {
         {ORDER_STATUSES.map(s => (
           <button
             key={s}
-            onClick={() => { setFilterStatus(s); setOffset(0); }}
+            onClick={() => setFilterStatus(s)}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${filterStatus === s ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
           >
             {STATUS_AR[s] ?? s}
@@ -385,7 +395,9 @@ export const AdminOrders = () => {
           {isLoading && <p className="px-4 py-8 text-center text-gray-400">جارٍ تحميل الطلبات...</p>}
           {!isLoading && visibleOrders.length === 0 && (
             <p className="px-4 py-8 text-center text-gray-400">
-              {todayMode ? `لا توجد طلبات بعد لـ ${todayLabel}` : 'لا توجد طلبات'}
+              {orderCustomerSearch
+                ? `لا توجد طلبات اليوم تطابق "${orderCustomerSearch}"`
+                : `لا توجد طلبات بعد لـ ${todayLabel}`}
             </p>
           )}
           {visibleOrders.map((order: any) => (
@@ -401,12 +413,30 @@ export const AdminOrders = () => {
                   <span className="text-sm font-bold text-gray-900">{order.price} ج.م</span>
                 </div>
               </div>
-              <p className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2 truncate">{order.pickup_address}</p>
+              <button
+                type="button"
+                onClick={() => setShowDetails(order)}
+                className="w-full text-right text-sm text-gray-700 bg-gray-50 active:bg-gray-100 rounded-lg px-3 py-2 truncate hover:bg-gray-100 transition-colors"
+                title="انقر لعرض كل التفاصيل"
+              >
+                {order.pickup_address}
+              </button>
+              {order.package_description && (
+                <button
+                  type="button"
+                  onClick={() => setShowDetails(order)}
+                  className="w-full text-right text-xs text-gray-600 bg-orange-50 active:bg-orange-100 rounded-lg px-3 py-2 truncate hover:bg-orange-100 transition-colors"
+                  title="انقر لعرض كل تفاصيل الطرد"
+                >
+                  📦 {order.package_description}
+                </button>
+              )}
               <div className="flex items-center justify-between text-xs text-gray-500">
                 <span>المندوب: {order.assigned_driver?.full_name ?? '—'}</span>
                 <span>{order.delivery_eta_minutes} د</span>
               </div>
               <div className="flex flex-wrap gap-2">
+                <button onClick={() => setShowDetails(order)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 font-semibold border border-gray-200">تفاصيل</button>
                 <button onClick={() => setShowOffers(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium">العروض</button>
                 {['pending', 'offered'].includes(order.status) && (
                   <button onClick={() => { setShowAssign(order.id); setAssignDriverId(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium">تعيين مندوب</button>
@@ -434,7 +464,9 @@ export const AdminOrders = () => {
               )}
               {!isLoading && visibleOrders.length === 0 && (
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">
-                  {todayMode ? `لا توجد طلبات بعد لـ ${todayLabel}` : 'لا توجد طلبات'}
+                  {orderCustomerSearch
+                    ? `لا توجد طلبات اليوم تطابق "${orderCustomerSearch}"`
+                    : `لا توجد طلبات بعد لـ ${todayLabel}`}
                 </td></tr>
               )}
               {visibleOrders.map((order: any) => (
@@ -444,19 +476,36 @@ export const AdminOrders = () => {
                     <p className="text-xs text-gray-400 mt-0.5">{order.customer.phone}</p>
                     <p className="text-xs font-mono text-gray-300 mt-0.5">{order.code}</p>
                   </td>
-                  <td className="px-4 py-3 max-w-[160px]">
+                  <td
+                    className="px-4 py-3 max-w-[160px] cursor-pointer group"
+                    onClick={() => setShowDetails(order)}
+                    title={order.package_description || 'انقر لعرض كل التفاصيل'}
+                  >
                     {order.package_description
-                      ? <p className="text-sm text-gray-700 truncate">{order.package_description}</p>
-                      : <p className="text-xs text-gray-300">—</p>}
+                      ? <p className="text-sm text-gray-700 truncate group-hover:text-blue-700 group-hover:underline">{order.package_description}</p>
+                      : <p className="text-xs text-gray-300 group-hover:text-blue-500">انقر للتفاصيل</p>}
                     {order.pickup_contact && <p className="text-xs text-gray-400 mt-0.5">📞 {order.pickup_contact}</p>}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate">{order.pickup_address}</td>
+                  <td
+                    className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate cursor-pointer hover:text-blue-700 hover:underline"
+                    onClick={() => setShowDetails(order)}
+                    title={order.pickup_address}
+                  >
+                    {order.pickup_address}
+                  </td>
                   <td className="px-4 py-3"><StatusBadge status={order.status} /></td>
                   <td className="px-4 py-3 text-sm text-gray-600">{order.assigned_driver?.full_name ?? '—'}</td>
                   <td className="px-4 py-3 text-sm font-semibold text-gray-900">{order.price} ج.م</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{order.delivery_eta_minutes} د</td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
+                      <button
+                        onClick={() => setShowDetails(order)}
+                        className="text-xs px-2 py-1 rounded-md bg-gray-50 text-gray-700 hover:bg-gray-100 font-medium border border-gray-200"
+                        title="عرض كل تفاصيل الطلب"
+                      >
+                        تفاصيل
+                      </button>
                       <button
                         onClick={() => setShowOffers(order.id)}
                         className="text-xs px-2 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium"
@@ -486,11 +535,6 @@ export const AdminOrders = () => {
             </tbody>
           </table>
         </div>
-        {data && !todayMode && (
-          <div className="px-4 pb-4">
-            <Pagination total={data.total} limit={LIMIT} offset={offset} onPageChange={setOffset} />
-          </div>
-        )}
       </div>
 
       {/* Create Order Modal */}
@@ -727,12 +771,13 @@ export const AdminOrders = () => {
 
       {/* Assign Driver Modal */}
       {showAssign !== null && (
-        <Modal title="تعيين مندوب يدوياً" onClose={() => setShowAssign(null)}>
+        <Modal title="تعيين مندوب يدوياً" onClose={() => assignMutation.isPending ? null : setShowAssign(null)}>
           <div className="space-y-4">
             <select
               value={assignDriverId}
               onChange={e => setAssignDriverId(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+              disabled={assignMutation.isPending}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50"
             >
               <option value="">اختر مندوباً متاحاً...</option>
               {activeDrivers.map((d: any) => (
@@ -742,11 +787,19 @@ export const AdminOrders = () => {
             {activeDrivers.length === 0 && (
               <p className="text-sm text-amber-600 bg-amber-50 p-2 rounded-lg">لا يوجد مناديب معتمدون ومتاحون حالياً.</p>
             )}
+            {assignMutation.isError && (
+              <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">
+                ❌ فشل تعيين المندوب. تحقق من الاتصال وحاول مرة أخرى.
+              </p>
+            )}
             <button
               onClick={() => assignMutation.mutate()}
               disabled={!assignDriverId || assignMutation.isPending}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
+              {assignMutation.isPending && (
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              )}
               {assignMutation.isPending ? 'جارٍ التعيين...' : 'تعيين المندوب'}
             </button>
           </div>
@@ -755,24 +808,38 @@ export const AdminOrders = () => {
 
       {/* Cancel Order Modal */}
       {showCancel !== null && (
-        <Modal title="إلغاء الطلب" onClose={() => setShowCancel(null)}>
+        <Modal title="إلغاء الطلب" onClose={() => cancelMutation.isPending ? null : setShowCancel(null)}>
           <div className="space-y-4">
             <textarea
               value={cancelReason}
               onChange={e => setCancelReason(e.target.value)}
               rows={3}
+              disabled={cancelMutation.isPending}
               placeholder="سبب الإلغاء (اختياري)..."
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 disabled:bg-gray-50"
             />
+            {cancelMutation.isError && (
+              <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">
+                ❌ فشل إلغاء الطلب. تحقق من الاتصال وحاول مرة أخرى.
+              </p>
+            )}
             <button
               onClick={() => cancelMutation.mutate()}
               disabled={cancelMutation.isPending}
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50"
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
+              {cancelMutation.isPending && (
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              )}
               {cancelMutation.isPending ? 'جارٍ الإلغاء...' : 'تأكيد الإلغاء'}
             </button>
           </div>
         </Modal>
+      )}
+
+      {/* Full Order Details Modal */}
+      {showDetails && (
+        <OrderDetailsModal order={showDetails} onClose={() => setShowDetails(null)} />
       )}
 
       {/* Offers Modal */}
