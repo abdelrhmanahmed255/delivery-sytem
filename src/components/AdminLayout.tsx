@@ -1,9 +1,11 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { useDarkMode } from '../utils/useDarkMode';
 
 export const AdminLayout = () => {
   const logout = useAuthStore((state) => state.logout);
   const location = useLocation();
+  const { isDark, toggle } = useDarkMode();
 
   const navItems = [
     { name: 'لوحة التحكم', path: '/admin/dashboard', icon: '🏠' },
@@ -16,12 +18,24 @@ export const AdminLayout = () => {
     { name: 'الإعدادات', path: '/admin/settings', icon: '⚙️' },
   ];
 
+  // `admin-scope` is the marker class our dark-mode CSS in index.css looks
+  // for. It limits the neutral-surface inversions to the admin dashboard so
+  // the driver app remains in light mode.
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="admin-scope flex h-screen bg-gray-100">
       {/* Desktop Sidebar */}
       <aside className="w-64 bg-white shadow-xl hidden md:flex flex-col flex-shrink-0">
-        <div className="p-6 border-b border-gray-100">
+        <div className="p-6 border-b border-gray-100 flex items-center justify-between gap-2">
           <h1 className="text-2xl font-bold text-gray-800">بوابة المسؤول</h1>
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={isDark ? 'التحويل إلى الوضع الفاتح' : 'التحويل إلى الوضع الداكن'}
+            title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
+            className="text-xl leading-none px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            {isDark ? '☀️' : '🌙'}
+          </button>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             {navItems.map((item) => (
@@ -40,7 +54,7 @@ export const AdminLayout = () => {
             ))}
         </nav>
         <div className="p-4 border-t border-gray-100">
-          <button 
+          <button
             onClick={logout}
             className="w-full py-2 px-4 bg-red-50 text-red-600 font-medium rounded-lg hover:bg-red-100 transition-colors"
           >
@@ -54,7 +68,17 @@ export const AdminLayout = () => {
         {/* Mobile Header */}
         <header className="bg-white shadow relative z-10 md:hidden p-4 font-bold text-gray-800 flex justify-between items-center flex-shrink-0">
             <span className="text-lg">بوابة المسؤول</span>
-            <button onClick={logout} className="text-red-500 text-sm font-medium">خروج</button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggle}
+                aria-label={isDark ? 'التحويل إلى الوضع الفاتح' : 'التحويل إلى الوضع الداكن'}
+                className="text-xl leading-none px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                {isDark ? '☀️' : '🌙'}
+              </button>
+              <button onClick={logout} className="text-red-500 text-sm font-medium">خروج</button>
+            </div>
         </header>
 
         {/* Page Content — extra bottom padding on mobile for the bottom nav */}

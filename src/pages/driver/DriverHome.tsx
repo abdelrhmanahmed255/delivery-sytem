@@ -9,11 +9,28 @@ import {
   showOfferNotification,
 } from '../../utils/notifications';
 
+/**
+ * How often to RE-FIRE the system notification while an offer is still
+ * pending and the driver hasn't opened it yet. The system tray is the only
+ * thing that wakes a driver whose phone is in their pocket, so we keep
+ * nagging until they tap it.
+ */
+const NOTIFY_REPEAT_INTERVAL_MS = 12_000;
+
+/** How often to re-vibrate / re-beep while an offer is pending. */
+const ALARM_REPEAT_INTERVAL_MS = 2_500;
+
+/** Vibration pattern used for both the notification AND navigator.vibrate */
+const VIBRATION_PATTERN = [400, 150, 400, 150, 400, 150, 600];
+
 export const DriverHome = () => {
   const queryClient = useQueryClient();
   const [openedOffer, setOpenedOffer] = useState<any>(null);
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => getNotificationPermission());
-  const lastNotifiedOfferIdRef = useRef<number | null>(null);
+  // Web Audio context for the in-page alarm beep. Lazily created on first
+  // offer so we don't ask for an AudioContext until we actually need one
+  // (browsers warn / log when an AC sits idle).
+  const audioCtxRef = useRef<AudioContext | null>(null);
 
   const { data: me } = useQuery({
     queryKey: ['driverMe'],
@@ -24,34 +41,98 @@ export const DriverHome = () => {
   const { data: offerSummary } = useQuery({
     queryKey: ['currentOffer'],
     queryFn: () => apiClient.get('/driver/orders/current-offer').then(r => r.data),
-    refetchInterval: 8000,
+    // Poll fast — every 5s — so we discover a new offer almost immediately.
+    refetchInterval: 5000,
     // Keep polling even when the tab is in the background — the whole point
     // of notifications is to alert the driver while they're not looking.
     refetchIntervalInBackground: true,
   });
 
-  // When a new offer arrives (transitions from "no offer" to "have offer", or
-  // the offer's id changes), fire an Android system-tray notification. We
-  // track the last-notified id so we don't re-notify on every poll for the
-  // same offer.
+  const pendingOfferId: number | undefined =
+    offerSummary?.id ?? offerSummary?.offer_id ?? offerSummary?.order_offer_id;
+  // We want repeated alerts ONLY while the driver hasn't opened the offer
+  // yet. Once they tap "show details", we stop nagging — the UI itself is
+  // alert enough.
+  const shouldAlarm = !!pendingOfferId && !openedOffer;
+
+  // ── System-tray notification: fire immediately on a new offer, then
+  //    re-fire every NOTIFY_REPEAT_INTERVAL_MS until the driver opens it.
   useEffect(() => {
-    if (!offerSummary) return;
-    const incomingId: number | undefined =
-      offerSummary?.id ?? offerSummary?.offer_id ?? offerSummary?.order_offer_id;
-    if (!incomingId || incomingId === lastNotifiedOfferIdRef.current) return;
-    lastNotifiedOfferIdRef.current = incomingId;
+    if (!shouldAlarm || !pendingOfferId) return;
+
     const price = offerSummary?.price ?? offerSummary?.order?.price;
     const area =
       offerSummary?.customer?.address ?? offerSummary?.order?.customer?.address ?? '';
-    showOfferNotification({
-      title: '🔔 طلب توصيل جديد!',
-      body: price
-        ? `المبلغ ${price} ج.م${area ? ` — ${area}` : ''} — اضغط لعرض التفاصيل`
-        : 'لديك عرض توصيل جديد — اضغط لعرض التفاصيل',
-      tag: `driver-offer-${incomingId}`,
-      url: '/driver/home',
-    });
-  }, [offerSummary]);
+    const fireNotification = () => {
+      showOfferNotification({
+        title: '🔔 طلب توصيل جديد!',
+        body: price
+          ? `المبلغ ${price} ج.م${area ? ` — ${area}` : ''} — اضغط لعرض التفاصيل`
+          : 'لديك عرض توصيل جديد — اضغط لعرض التفاصيل',
+        // Same tag + renotify=true → Android replays the alert (sound +
+        // vibrate) every time we call it, without stacking multiple
+        // entries in the shade.
+        tag: `driver-offer-${pendingOfferId}`,
+        url: '/driver/home',
+      });
+    };
+
+    fireNotification();
+    const id = setInterval(fireNotification, NOTIFY_REPEAT_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [shouldAlarm, pendingOfferId, offerSummary]);
+
+  // ── In-page audible beep + device vibration while the offer is pending.
+  //    This is the secondary alert — even with the screen on and the tab
+  //    foregrounded, we want an unmistakable "ringing phone" feeling.
+  useEffect(() => {
+    if (!shouldAlarm) return;
+
+    const playBeep = () => {
+      try {
+        if (!audioCtxRef.current) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const AC = (window.AudioContext || (window as any).webkitAudioContext);
+          if (!AC) return;
+          audioCtxRef.current = new AC();
+        }
+        const ctx = audioCtxRef.current;
+        // Some mobile browsers suspend the context until a user gesture;
+        // resume() is a no-op if it's already running.
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+        // Two-tone alarm: short rising "ding-dong" — much harder to ignore
+        // than a single beep.
+        const now = ctx.currentTime;
+        const makeTone = (freq: number, start: number, duration: number) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.0001, now + start);
+          gain.gain.exponentialRampToValueAtTime(0.4, now + start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + start + duration);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(now + start);
+          osc.stop(now + start + duration + 0.05);
+        };
+        makeTone(880, 0, 0.25);
+        makeTone(1175, 0.28, 0.35);
+      } catch {
+        // Audio is best-effort; silently ignore on unsupported browsers.
+      }
+
+      try {
+        navigator.vibrate?.(VIBRATION_PATTERN);
+      } catch {
+        // Vibration is best-effort.
+      }
+    };
+
+    playBeep();
+    const id = setInterval(playBeep, ALARM_REPEAT_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [shouldAlarm]);
 
   const availabilityMutation = useMutation({
     mutationFn: (val: boolean) => driversApi.setAvailability(val),
@@ -82,10 +163,6 @@ export const DriverHome = () => {
 
   const isAvailable = me?.is_available;
   const isRestricted = me?.restricted_until && new Date(me.restricted_until) > new Date();
-
-  // The current-offer endpoint may return the ID under different field names
-  const pendingOfferId: number | undefined =
-    offerSummary?.id ?? offerSummary?.offer_id ?? offerSummary?.order_offer_id;
 
   const offerOrder = openedOffer?.order ?? openedOffer;
 

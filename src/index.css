@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Tailwind v4 dark-mode variant.
+   Class strategy — admins toggle the theme explicitly from the header; we
+   persist the choice in localStorage (see useDarkMode.ts).
+   ────────────────────────────────────────────────────────────────────────── */
+@custom-variant dark (&:where(.dark, .dark *));
+
 *, html, body, #root {
   font-family: 'Cairo', 'Segoe UI', system-ui, sans-serif;
   box-sizing: border-box;
@@ -10,3 +17,180 @@ html, body, #root {
   margin: 0;
   direction: rtl;
 }
+
+/* Improves native form-control / scrollbar contrast under dark mode. */
+.dark {
+  color-scheme: dark;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   ADMIN-SCOPED DARK MODE
+   Every override below only applies under `.dark .admin-scope`. The driver
+   app intentionally stays in light mode (it never adds `admin-scope`).
+
+   Strategy:
+     • NEUTRAL surfaces (white / gray) → dark gray equivalents.
+     • COLORED tints (bg-{c}-50 / -100, border-{c}-100/200) → re-tinted as
+       semi-transparent overlays of the SAME hue, so the accent reads but
+       light-mode text remains legible on the new dark surface.
+     • COLORED text (text-{c}-500..800) → lightened a few notches so
+       it stays readable on the new dark tinted surface.
+     • SOLID buttons (bg-{c}-500/600/700) are left alone — they were
+       already designed for white text on a vivid background.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.dark .admin-scope {
+  background-color: #111827; /* gray-900 */
+  color: #f3f4f6;             /* gray-100 */
+}
+
+/* ── Neutral surfaces ────────────────────────────────────────────────────── */
+.dark .admin-scope .bg-white     { background-color: #1f2937; } /* gray-800 */
+.dark .admin-scope .bg-gray-50   { background-color: #1f2937; }
+.dark .admin-scope .bg-gray-100  { background-color: #111827; }
+
+/* ── Neutral text ────────────────────────────────────────────────────────── */
+.dark .admin-scope .text-gray-900 { color: #f3f4f6; }
+.dark .admin-scope .text-gray-800 { color: #e5e7eb; }
+.dark .admin-scope .text-gray-700 { color: #d1d5db; }
+.dark .admin-scope .text-gray-600 { color: #9ca3af; }
+.dark .admin-scope .text-gray-500 { color: #9ca3af; }
+.dark .admin-scope .text-gray-400 { color: #9ca3af; }
+.dark .admin-scope .text-gray-300 { color: #9ca3af; }
+
+/* ── Neutral borders / dividers ──────────────────────────────────────────── */
+.dark .admin-scope .border-gray-50,
+.dark .admin-scope .border-gray-100,
+.dark .admin-scope .border-gray-200 { border-color: #374151; } /* gray-700 */
+.dark .admin-scope .divide-gray-50 > :not([hidden]) ~ :not([hidden]),
+.dark .admin-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #374151;
+}
+
+/* ── Neutral hover surfaces ──────────────────────────────────────────────── */
+.dark .admin-scope .hover\:bg-gray-50:hover,
+.dark .admin-scope .hover\:bg-gray-100:hover {
+  background-color: #374151;
+}
+
+/* ── Form controls — inputs default to OS white otherwise ────────────────── */
+.dark .admin-scope input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.dark .admin-scope textarea,
+.dark .admin-scope select {
+  background-color: #1f2937;
+  color: #f3f4f6;
+  border-color: #374151;
+}
+.dark .admin-scope input::placeholder,
+.dark .admin-scope textarea::placeholder {
+  color: #6b7280;
+}
+
+/* ── Colored tinted backgrounds (-50 / -100) ─────────────────────────────── */
+.dark .admin-scope .bg-blue-50    { background-color: rgba(59, 130, 246, 0.12); }
+.dark .admin-scope .bg-blue-100   { background-color: rgba(59, 130, 246, 0.20); }
+.dark .admin-scope .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.12); }
+.dark .admin-scope .bg-emerald-100{ background-color: rgba(16, 185, 129, 0.20); }
+.dark .admin-scope .bg-green-50   { background-color: rgba(34, 197, 94, 0.12); }
+.dark .admin-scope .bg-green-100  { background-color: rgba(34, 197, 94, 0.22); }
+.dark .admin-scope .bg-red-50     { background-color: rgba(239, 68, 68, 0.12); }
+.dark .admin-scope .bg-red-100    { background-color: rgba(239, 68, 68, 0.22); }
+.dark .admin-scope .bg-orange-50  { background-color: rgba(249, 115, 22, 0.12); }
+.dark .admin-scope .bg-orange-100 { background-color: rgba(249, 115, 22, 0.22); }
+.dark .admin-scope .bg-yellow-50  { background-color: rgba(234, 179, 8, 0.14); }
+.dark .admin-scope .bg-yellow-100 { background-color: rgba(234, 179, 8, 0.22); }
+.dark .admin-scope .bg-amber-50   { background-color: rgba(245, 158, 11, 0.12); }
+.dark .admin-scope .bg-amber-100  { background-color: rgba(245, 158, 11, 0.22); }
+.dark .admin-scope .bg-indigo-50  { background-color: rgba(99, 102, 241, 0.14); }
+.dark .admin-scope .bg-indigo-100 { background-color: rgba(99, 102, 241, 0.22); }
+.dark .admin-scope .bg-purple-50  { background-color: rgba(168, 85, 247, 0.14); }
+.dark .admin-scope .bg-purple-100 { background-color: rgba(168, 85, 247, 0.22); }
+.dark .admin-scope .bg-rose-50    { background-color: rgba(244, 63, 94, 0.12); }
+.dark .admin-scope .bg-rose-100   { background-color: rgba(244, 63, 94, 0.22); }
+
+/* ── Hover colored tints ─────────────────────────────────────────────────── */
+.dark .admin-scope .hover\:bg-blue-50:hover    { background-color: rgba(59, 130, 246, 0.18); }
+.dark .admin-scope .hover\:bg-blue-100:hover   { background-color: rgba(59, 130, 246, 0.28); }
+.dark .admin-scope .hover\:bg-emerald-50:hover { background-color: rgba(16, 185, 129, 0.18); }
+.dark .admin-scope .hover\:bg-emerald-100:hover{ background-color: rgba(16, 185, 129, 0.28); }
+.dark .admin-scope .hover\:bg-red-50:hover     { background-color: rgba(239, 68, 68, 0.18); }
+.dark .admin-scope .hover\:bg-red-100:hover    { background-color: rgba(239, 68, 68, 0.28); }
+.dark .admin-scope .hover\:bg-orange-50:hover  { background-color: rgba(249, 115, 22, 0.18); }
+.dark .admin-scope .hover\:bg-orange-100:hover { background-color: rgba(249, 115, 22, 0.28); }
+.dark .admin-scope .hover\:bg-indigo-50:hover  { background-color: rgba(99, 102, 241, 0.18); }
+
+/* ── Colored borders (-100 / -200) ───────────────────────────────────────── */
+.dark .admin-scope .border-blue-100,
+.dark .admin-scope .border-blue-200    { border-color: rgba(59, 130, 246, 0.35); }
+.dark .admin-scope .border-emerald-100,
+.dark .admin-scope .border-emerald-200 { border-color: rgba(16, 185, 129, 0.35); }
+.dark .admin-scope .border-green-100,
+.dark .admin-scope .border-green-200   { border-color: rgba(34, 197, 94, 0.35); }
+.dark .admin-scope .border-red-100,
+.dark .admin-scope .border-red-200     { border-color: rgba(239, 68, 68, 0.35); }
+.dark .admin-scope .border-orange-100,
+.dark .admin-scope .border-orange-200  { border-color: rgba(249, 115, 22, 0.35); }
+.dark .admin-scope .border-yellow-100,
+.dark .admin-scope .border-yellow-200  { border-color: rgba(234, 179, 8, 0.40); }
+.dark .admin-scope .border-amber-100,
+.dark .admin-scope .border-amber-200   { border-color: rgba(245, 158, 11, 0.40); }
+.dark .admin-scope .border-indigo-100,
+.dark .admin-scope .border-indigo-200  { border-color: rgba(99, 102, 241, 0.40); }
+.dark .admin-scope .border-purple-100,
+.dark .admin-scope .border-purple-200  { border-color: rgba(168, 85, 247, 0.40); }
+
+/* ── Colored text — lighten so it reads on the new dark tints ────────────── */
+/* blue */
+.dark .admin-scope .text-blue-500 { color: #93c5fd; }
+.dark .admin-scope .text-blue-600 { color: #93c5fd; }
+.dark .admin-scope .text-blue-700 { color: #93c5fd; }
+.dark .admin-scope .text-blue-800 { color: #bfdbfe; }
+.dark .admin-scope .text-blue-900 { color: #dbeafe; }
+/* emerald */
+.dark .admin-scope .text-emerald-500 { color: #6ee7b7; }
+.dark .admin-scope .text-emerald-600 { color: #6ee7b7; }
+.dark .admin-scope .text-emerald-700 { color: #6ee7b7; }
+.dark .admin-scope .text-emerald-800 { color: #a7f3d0; }
+.dark .admin-scope .text-emerald-900 { color: #d1fae5; }
+/* green */
+.dark .admin-scope .text-green-500 { color: #86efac; }
+.dark .admin-scope .text-green-600 { color: #86efac; }
+.dark .admin-scope .text-green-700 { color: #86efac; }
+.dark .admin-scope .text-green-800 { color: #bbf7d0; }
+/* red */
+.dark .admin-scope .text-red-500 { color: #fca5a5; }
+.dark .admin-scope .text-red-600 { color: #fca5a5; }
+.dark .admin-scope .text-red-700 { color: #fca5a5; }
+.dark .admin-scope .text-red-800 { color: #fecaca; }
+/* orange */
+.dark .admin-scope .text-orange-500 { color: #fdba74; }
+.dark .admin-scope .text-orange-600 { color: #fdba74; }
+.dark .admin-scope .text-orange-700 { color: #fdba74; }
+.dark .admin-scope .text-orange-800 { color: #fed7aa; }
+/* yellow */
+.dark .admin-scope .text-yellow-500 { color: #fde047; }
+.dark .admin-scope .text-yellow-600 { color: #fde047; }
+.dark .admin-scope .text-yellow-700 { color: #fde047; }
+.dark .admin-scope .text-yellow-800 { color: #fef08a; }
+/* amber */
+.dark .admin-scope .text-amber-500 { color: #fcd34d; }
+.dark .admin-scope .text-amber-600 { color: #fcd34d; }
+.dark .admin-scope .text-amber-700 { color: #fcd34d; }
+.dark .admin-scope .text-amber-800 { color: #fde68a; }
+/* indigo */
+.dark .admin-scope .text-indigo-500 { color: #a5b4fc; }
+.dark .admin-scope .text-indigo-600 { color: #a5b4fc; }
+.dark .admin-scope .text-indigo-700 { color: #a5b4fc; }
+.dark .admin-scope .text-indigo-800 { color: #c7d2fe; }
+/* purple */
+.dark .admin-scope .text-purple-500 { color: #d8b4fe; }
+.dark .admin-scope .text-purple-600 { color: #d8b4fe; }
+.dark .admin-scope .text-purple-700 { color: #d8b4fe; }
+.dark .admin-scope .text-purple-800 { color: #e9d5ff; }
+/* rose */
+.dark .admin-scope .text-rose-600 { color: #fda4af; }
+.dark .admin-scope .text-rose-700 { color: #fda4af; }
+
+/* ── Gradient surfaces (driver-name banner on AdminDrivers, etc.) ────────── */
+/* Tailwind gradients are inline-defined via classes — they keep their light
+   colors. They render fine on dark surfaces. No override needed. */

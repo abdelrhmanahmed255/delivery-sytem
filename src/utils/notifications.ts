@@ -95,8 +95,13 @@ export const showOfferNotification = async (
       badge: '/icon-192.svg',
       lang: 'ar',
       dir: 'rtl',
+      // renotify=true makes Android re-play sound + vibration every time
+      // we re-fire a notification with the same tag, which is what the
+      // page-side repeat timer relies on.
       renotify: true,
-      vibrate: [200, 100, 200, 100, 200],
+      // Long, attention-grabbing vibration pattern (ms): 4 strong pulses
+      // ending with one longer pulse. Tuned for a phone in a pocket.
+      vibrate: [400, 150, 400, 150, 400, 150, 600],
       requireInteraction: true,
       data: { url: payload.url || '/driver/home' },
     };

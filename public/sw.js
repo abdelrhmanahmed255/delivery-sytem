@@ -49,8 +49,12 @@ self.addEventListener('message', (event) => {
       lang: 'ar',
       dir: 'rtl',
       // Re-alerts every time even if a notification with the same tag exists.
+      // Combined with the page-side repeat timer this lets us "ring" the
+      // driver's phone every ~12s until they tap it.
       renotify: true,
-      vibrate: [200, 100, 200, 100, 200],
+      // Longer, more aggressive vibration so a driver with the phone in
+      // their pocket can actually feel it.
+      vibrate: [400, 150, 400, 150, 400, 150, 600],
       requireInteraction: true,
       data: { url: url || '/driver/home' },
     })
@@ -76,7 +80,7 @@ self.addEventListener('push', (event) => {
       lang: 'ar',
       dir: 'rtl',
       renotify: true,
-      vibrate: [200, 100, 200, 100, 200],
+      vibrate: [400, 150, 400, 150, 400, 150, 600],
       requireInteraction: true,
       data: { url: payload.url || '/driver/home' },
     })

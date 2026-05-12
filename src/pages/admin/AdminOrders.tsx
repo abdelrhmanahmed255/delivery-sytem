@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '../../api/orders';
@@ -62,12 +62,13 @@ export const AdminOrders = () => {
   // customer's name auto-fills the address only until the admin overrides it.
   const [pickupAddressTouched, setPickupAddressTouched] = useState(false);
 
-  // Inline customer search/create state
-  const [customerSearch, setCustomerSearch] = useState('');
+  // Phone-first customer lookup. The admin types the customer's phone, we
+  // look it up by exact match, and either auto-pick the existing customer or
+  // (on submit) auto-create one whose full_name and address are both the
+  // pickup-location string the admin entered.
+  const [customerPhone, setCustomerPhone] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
-  const [showCustomerCreate, setShowCustomerCreate] = useState(false);
-  const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '', notes: '' });
-  const [customerCreateError, setCustomerCreateError] = useState('');
+  const [createError, setCreateError] = useState('');
 
   // Today bounds recomputed on every render so a day rollover during a long
   // open session is reflected automatically on the next refetch.
@@ -99,11 +100,68 @@ export const AdminOrders = () => {
     refetchInterval: 30_000,
   });
 
-  const { data: customerSearchResults } = useQuery({
-    queryKey: ['customer-search', customerSearch],
-    queryFn: () => customersApi.list({ search: normalizeIfPhoneLike(customerSearch), limit: 10 }),
-    enabled: customerSearch.trim().length > 1,
+  // Live (digit-by-digit) phone search. We hit the customers API as soon as
+  // 3+ digits have been typed — exactly like the old free-text search —
+  // and show matches in a dropdown the admin can click. We also keep an
+  // "exact match" check for the 11-digit normalized form, which is what
+  // drives the silent auto-pick / auto-create behaviour on submit.
+  const phoneDigits = useMemo(
+    () => customerPhone.replace(/\D/g, ''),
+    [customerPhone]
+  );
+  const normalizedCustomerPhone = useMemo(
+    () => normalizeEgyptPhone(customerPhone),
+    [customerPhone]
+  );
+  const isPhoneValid =
+    normalizedCustomerPhone.length === 11 && normalizedCustomerPhone.startsWith('01');
+  const canLookup = phoneDigits.length >= 3;
+  // Send the most-normalized form we can (e.g. "0127" instead of "127" or
+  // "+201 27") so the backend's substring search matches what's stored.
+  const lookupQuery = normalizedCustomerPhone || phoneDigits;
+
+  const { data: customerSearchResults, isFetching: customerLookupFetching } = useQuery({
+    queryKey: ['customer-search', lookupQuery],
+    queryFn: () => customersApi.list({ search: lookupQuery, limit: 8 }),
+    enabled: canLookup,
   });
+
+  const searchResults: any[] = canLookup ? (customerSearchResults?.items ?? []) : [];
+
+  // Exact phone match → an existing customer. We compare normalized forms on
+  // both sides so a customer record stored as "+20 1XX..." still matches an
+  // admin who typed "01XX..." (or vice-versa).
+  const exactPhoneMatch = useMemo(() => {
+    if (!isPhoneValid) return null;
+    return (
+      searchResults.find((c: any) => normalizeEgyptPhone(c.phone || '') === normalizedCustomerPhone) ?? null
+    );
+  }, [isPhoneValid, searchResults, normalizedCustomerPhone]);
+
+  // Auto-pick the matched customer (or clear the selection when the phone
+  // no longer matches anyone). This is what removes the explicit
+  // "+ create new customer" click — the modal silently switches between
+  // "use existing" and "auto-create from location" based on the phone.
+  //
+  // When we DROP the selection (e.g. admin deleted the phone they typed),
+  // we ALSO wipe the pickup_address — but only if the admin hadn't manually
+  // edited it. Otherwise an auto-filled location would linger after the
+  // phone is cleared, which was confusing (May-2026 bug report).
+  useEffect(() => {
+    if (exactPhoneMatch) {
+      if (!selectedCustomer || selectedCustomer.id !== exactPhoneMatch.id) {
+        pickCustomer(exactPhoneMatch);
+      }
+    } else if (selectedCustomer) {
+      setSelectedCustomer(null);
+      setForm(f => ({
+        ...f,
+        customer_id: '',
+        pickup_address: pickupAddressTouched ? f.pickup_address : '',
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exactPhoneMatch]);
 
   const { data: offersData } = useQuery({
     queryKey: ['offers', showOffers],
@@ -111,35 +169,64 @@ export const AdminOrders = () => {
     enabled: showOffers !== null,
   });
 
-  const createCustomerMutation = useMutation({
-    mutationFn: () => customersApi.create({
-      full_name: newCustomer.full_name,
-      phone: normalizeEgyptPhone(newCustomer.phone) || newCustomer.phone,
-      address: newCustomer.address,
-      notes: newCustomer.notes || undefined,
-    }),
-    onSuccess: (created: any) => {
-      pickCustomer(created);
-      setShowCustomerCreate(false);
-      setNewCustomer({ full_name: '', phone: '', address: '', notes: '' });
-      setCustomerCreateError('');
-    },
-    onError: () => setCustomerCreateError('فشل إنشاء العميل. يرجى التحقق من البيانات.'),
-  });
-
+  /**
+   * Create-order mutation.
+   *
+   * If we already have a `selectedCustomer` (i.e. the typed phone matched an
+   * existing record) we just create the order. Otherwise we silently create
+   * the customer first — using the `pickup_address` value as BOTH the
+   * customer's `full_name` AND `address` so the order's "العميل" and "📍" rows
+   * line up with what the admin actually knows (a phone + a location).
+   *
+   * This is the explicit product behaviour requested May 2026: no more
+   * "+ إنشاء عميل جديد" button — the admin just types phone + location and
+   * the customer record is materialised on the fly.
+   */
   const createMutation = useMutation({
-    mutationFn: () => ordersApi.create({
-      customer_id: Number(form.customer_id),
-      pickup_address: form.pickup_address,
-      pickup_contact: form.pickup_contact ? (normalizeEgyptPhone(form.pickup_contact) || form.pickup_contact) : undefined,
-      package_description: form.package_description || undefined,
-      price: form.price,
-      delivery_eta_minutes: Number(form.delivery_eta_minutes),
-      distribution_mode: form.distribution_mode,
-    }),
+    mutationFn: async () => {
+      const location = form.pickup_address.trim();
+      let customerId = selectedCustomer ? Number(selectedCustomer.id) : null;
+      if (!customerId) {
+        if (!isPhoneValid) {
+          throw new Error('phone-invalid');
+        }
+        if (!location) {
+          throw new Error('location-required');
+        }
+        const created = await customersApi.create({
+          full_name: location,
+          phone: normalizedCustomerPhone,
+          address: location,
+        });
+        customerId = Number(created.id);
+      }
+      return ordersApi.create({
+        customer_id: customerId,
+        pickup_address: form.pickup_address,
+        pickup_contact: form.pickup_contact
+          ? (normalizeEgyptPhone(form.pickup_contact) || form.pickup_contact)
+          : undefined,
+        package_description: form.package_description || undefined,
+        price: form.price,
+        delivery_eta_minutes: Number(form.delivery_eta_minutes),
+        distribution_mode: form.distribution_mode,
+      });
+    },
     onSuccess: async () => {
       await queryClient.refetchQueries({ queryKey: ['orders'] });
+      // Also refresh the customers list so a freshly auto-created customer
+      // shows up immediately on the customers page.
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
       resetCreate();
+    },
+    onError: (err: any) => {
+      if (err?.message === 'phone-invalid') {
+        setCreateError('رقم الهاتف غير صالح. تأكد أنه ١١ رقم يبدأ بـ 01.');
+      } else if (err?.message === 'location-required') {
+        setCreateError('يرجى إدخال موقع / عنوان العميل.');
+      } else {
+        setCreateError('فشل إنشاء الطلب. يرجى التحقق من البيانات وحاول مرة أخرى.');
+      }
     },
   });
 
@@ -195,31 +282,32 @@ export const AdminOrders = () => {
 
   const activeDrivers = driversData?.items?.filter((d: any) => d.approval_status === 'approved' && d.is_available && d.is_active) ?? [];
 
-  // Selecting a customer (either from search or after inline create) also
-  // pre-fills the pickup address with the customer's name — many customers
-  // share an address with their own name, and the admin can still edit it.
+  // Selecting a customer also pre-fills the pickup address with the
+  // customer's name — many customers share an address with their own name
+  // (see photo 2 in the May-2026 spec) and the admin can still edit it.
+  // Also syncs the phone input to the picked customer's normalized phone so
+  // the live-search effect doesn't immediately clear the selection.
   const pickCustomer = (c: any) => {
     setSelectedCustomer(c);
+    const normalized = normalizeEgyptPhone(c.phone || '') || (c.phone || '');
+    setCustomerPhone(normalized);
     setForm(f => ({
       ...f,
       customer_id: String(c.id),
-      pickup_address: pickupAddressTouched && f.pickup_address ? f.pickup_address : c.full_name,
+      pickup_address: pickupAddressTouched && f.pickup_address
+        ? f.pickup_address
+        : (c.address || c.full_name || ''),
     }));
-    setCustomerSearch(c.full_name);
   };
 
   const resetCreate = () => {
     setForm({ customer_id: '', pickup_address: '', pickup_contact: '', package_description: '', price: '0', delivery_eta_minutes: '30', distribution_mode: 'auto' });
-    setCustomerSearch('');
+    setCustomerPhone('');
     setSelectedCustomer(null);
-    setShowCustomerCreate(false);
-    setNewCustomer({ full_name: '', phone: '', address: '', notes: '' });
-    setCustomerCreateError('');
+    setCreateError('');
     setPickupAddressTouched(false);
     setShowCreate(false);
   };
-
-  const searchResults = customerSearch.trim().length > 1 ? (customerSearchResults?.items ?? []) : [];
 
   // Strict client-side guard: even if the backend ignores from/to we cull
   // anything outside today's local window here, plus apply the on-page
@@ -293,7 +381,7 @@ export const AdminOrders = () => {
       </div>
 
       {/* Available drivers banner */}
-      <div className="bg-gradient-to-l from-emerald-50 via-green-50 to-white border border-emerald-100 rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-gradient-to-l from-emerald-50 via-green-50 to-white dark:from-emerald-900/30 dark:via-emerald-900/15 dark:to-gray-800 border border-emerald-100 rounded-xl shadow-sm overflow-hidden">
         <button
           type="button"
           onClick={() => setDriversBannerOpen(o => !o)}
@@ -540,150 +628,91 @@ export const AdminOrders = () => {
       {/* Create Order Modal */}
       {showCreate && (
         <Modal title="إنشاء طلب جديد" onClose={resetCreate}>
-          <form className="space-y-4" onSubmit={e => { e.preventDefault(); createMutation.mutate(); }}>
+          <form className="space-y-4" onSubmit={e => { e.preventDefault(); setCreateError(''); createMutation.mutate(); }}>
 
-            {/* Customer search/select */}
+            {/* Customer phone — single field with live (digit-by-digit)
+                search. Matches show up in a dropdown the admin can click.
+                If they type a full 11-digit phone that matches an existing
+                record we auto-pick it; if it has no match the order is
+                created with a NEW customer whose name & address are both
+                the location string entered below. No extra clicks needed. */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">العميل *</label>
-              {selectedCustomer ? (
-                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                  <div>
-                    <p className="text-sm font-semibold text-emerald-800">{selectedCustomer.full_name}</p>
-                    <p className="text-xs text-emerald-600">{selectedCustomer.phone}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedCustomer(null); setForm(f => ({ ...f, customer_id: '' })); setCustomerSearch(''); }}
-                    className="text-xs text-red-500 hover:text-red-700 font-medium"
-                  >
-                    تغيير
-                  </button>
-                </div>
-              ) : (
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={customerSearch}
-                    onChange={e => { setCustomerSearch(e.target.value); setShowCustomerCreate(false); }}
-                    onPaste={handlePhonePaste(v => { setCustomerSearch(v); setShowCustomerCreate(false); })}
-                    placeholder="ابحث بالاسم أو رقم الهاتف..."
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                  />
-                  {/* Dropdown results */}
-                  {customerSearch.trim().length > 1 && (
-                    <div className="absolute z-20 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                      {searchResults.length > 0 ? (
-                        <>
-                          {searchResults.map((c: any) => (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() => pickCustomer(c)}
-                              className="w-full text-right px-3 py-2 hover:bg-gray-50 border-b border-gray-50 last:border-0"
-                            >
-                              <p className="text-sm font-medium text-gray-800">{c.full_name}</p>
-                              <p className="text-xs text-gray-500" dir="ltr">{c.phone}</p>
-                            </button>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={() => { setShowCustomerCreate(true); setCustomerSearch(''); }}
-                            className="w-full text-right px-3 py-2 text-sm text-emerald-700 font-medium hover:bg-emerald-50 border-t border-gray-100"
-                          >
-                            + إنشاء عميل جديد
-                          </button>
-                        </>
-                      ) : (
-                        <div className="px-3 py-3">
-                          <p className="text-sm text-gray-500 mb-2">لا توجد نتائج لـ "{customerSearch}"</p>
-                          <button
-                            type="button"
-                            onClick={() => { setShowCustomerCreate(true); setCustomerSearch(''); }}
-                            className="text-sm text-emerald-700 font-semibold hover:underline"
-                          >
-                            + إنشاء عميل جديد
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Inline new customer form */}
-            {showCustomerCreate && (
-              <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-4 space-y-3">
-                <p className="font-semibold text-emerald-800 text-sm">إنشاء عميل جديد</p>
-                <input
-                  type="text"
-                  value={newCustomer.full_name}
-                  onChange={e => setNewCustomer(n => ({ ...n, full_name: e.target.value }))}
-                  placeholder="الاسم الكامل *"
-                  required={showCustomerCreate}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
-                />
+              <label className="block text-sm font-medium text-gray-700 mb-1">رقم هاتف العميل *</label>
+              <div className="relative">
                 <input
                   type="tel"
-                  value={newCustomer.phone}
-                  onChange={e => setNewCustomer(n => ({ ...n, phone: e.target.value }))}
-                  onPaste={handlePhonePaste(v => setNewCustomer(n => ({ ...n, phone: v })))}
+                  required
+                  value={customerPhone}
+                  onChange={e => setCustomerPhone(e.target.value)}
+                  onPaste={handlePhonePaste(setCustomerPhone)}
                   onBlur={e => {
                     const v = normalizeEgyptPhone(e.target.value);
-                    if (v && v !== e.target.value) setNewCustomer(n => ({ ...n, phone: v }));
+                    if (v && v !== e.target.value) setCustomerPhone(v);
                   }}
-                  placeholder="رقم الهاتف *  (مثال: 01XXXXXXXXX)"
-                  required={showCustomerCreate}
+                  placeholder="01XXXXXXXXX"
                   dir="ltr"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 text-right"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-right"
                 />
-                <input
-                  type="text"
-                  value={newCustomer.address}
-                  onChange={e => setNewCustomer(n => ({ ...n, address: e.target.value }))}
-                  placeholder="العنوان *"
-                  required={showCustomerCreate}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
-                />
-                <input
-                  type="text"
-                  value={newCustomer.notes}
-                  onChange={e => setNewCustomer(n => ({ ...n, notes: e.target.value }))}
-                  placeholder="ملاحظات (اختياري)"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500"
-                />
-                {customerCreateError && <p className="text-xs text-red-600">{customerCreateError}</p>}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => { setShowCustomerCreate(false); setCustomerCreateError(''); }}
-                    className="flex-1 border border-gray-200 text-gray-600 text-sm font-medium py-2 rounded-lg hover:bg-gray-50"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newCustomer.full_name || !newCustomer.phone || !newCustomer.address) {
-                        setCustomerCreateError('يرجى ملء الحقول المطلوبة.');
-                        return;
-                      }
-                      createCustomerMutation.mutate();
-                    }}
-                    disabled={createCustomerMutation.isPending}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-2 rounded-lg disabled:opacity-50"
-                  >
-                    {createCustomerMutation.isPending ? 'جارٍ الإنشاء...' : 'إنشاء العميل'}
-                  </button>
-                </div>
+
+                {/* Live dropdown of customers whose phone contains the
+                    digits typed so far. Hidden once we've already locked
+                    onto a customer (otherwise it'd reappear over the
+                    selected-customer chip). */}
+                {canLookup && !selectedCustomer && searchResults.length > 0 && (
+                  <div className="absolute z-20 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                    {searchResults.map((c: any) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => pickCustomer(c)}
+                        className="w-full text-right px-3 py-2 hover:bg-gray-50 border-b border-gray-50 last:border-0"
+                      >
+                        <p className="text-sm font-medium text-gray-800 truncate">{c.full_name}</p>
+                        <p className="text-xs text-gray-500 truncate" dir="ltr">{c.phone}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+
+              {/* Status row — single line summary of what will happen on
+                  submit (use existing customer / auto-create / waiting / etc) */}
+              <div className="mt-1.5 min-h-[1.25rem] text-xs">
+                {!customerPhone.trim() ? (
+                  <span className="text-gray-400">ابدأ بكتابة رقم الهاتف للبحث التلقائي.</span>
+                ) : customerLookupFetching ? (
+                  <span className="text-gray-500">جارٍ البحث...</span>
+                ) : selectedCustomer ? (
+                  <span className="text-emerald-700 font-semibold">
+                    ✅ عميل مسجّل: {selectedCustomer.full_name}
+                  </span>
+                ) : !canLookup ? (
+                  <span className="text-gray-400">اكتب ٣ أرقام على الأقل للبحث.</span>
+                ) : !isPhoneValid ? (
+                  searchResults.length > 0 ? (
+                    <span className="text-gray-500">
+                      {searchResults.length} نتيجة — اضغط لاختيار العميل، أو أكمل الرقم لإنشاء عميل جديد.
+                    </span>
+                  ) : (
+                    <span className="text-amber-600">
+                      لا توجد نتائج. أكمل الرقم (١١ خانة تبدأ بـ 01) لإنشاء عميل جديد.
+                    </span>
+                  )
+                ) : (
+                  <span className="text-blue-700 font-semibold">
+                    🆕 عميل جديد — سيتم إنشاؤه تلقائياً من العنوان أدناه.
+                  </span>
+                )}
+              </div>
+            </div>
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium text-gray-700">عنوان الاستلام *</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  {selectedCustomer ? 'عنوان الاستلام *' : 'موقع العميل / عنوان الاستلام *'}
+                </label>
                 {selectedCustomer && !pickupAddressTouched && (
-                  <span className="text-xs text-emerald-600 font-medium">↺ تلقائي من اسم العميل — يمكنك التعديل</span>
+                  <span className="text-xs text-emerald-600 font-medium">↺ تلقائي من بيانات العميل — يمكنك التعديل</span>
                 )}
               </div>
               <input
@@ -694,6 +723,11 @@ export const AdminOrders = () => {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                 placeholder="مثال: شارع ٢٦ يوليو، الجيزة"
               />
+              {!selectedCustomer && isPhoneValid && (
+                <p className="text-[11px] text-gray-500 mt-1">
+                  سيُحفظ هذا النص كاسم العميل وعنوانه عند الإنشاء.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">جهة الاتصال عند الاستلام</label>
@@ -755,15 +789,26 @@ export const AdminOrders = () => {
                 </label>
               </div>
             </div>
-            {createMutation.error && (
-              <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">فشل إنشاء الطلب. يرجى التحقق من البيانات.</p>
+            {createError && (
+              <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">{createError}</p>
             )}
             <button
               type="submit"
-              disabled={createMutation.isPending || !form.customer_id}
+              disabled={
+                createMutation.isPending ||
+                customerLookupFetching ||
+                !isPhoneValid ||
+                !form.pickup_address.trim()
+              }
               className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50"
             >
-              {createMutation.isPending ? 'جارٍ الإنشاء...' : 'إنشاء الطلب'}
+              {createMutation.isPending
+                ? 'جارٍ الإنشاء...'
+                : customerLookupFetching
+                ? 'جارٍ البحث عن العميل...'
+                : selectedCustomer
+                ? 'إنشاء الطلب'
+                : 'إنشاء العميل والطلب'}
             </button>
           </form>
         </Modal>
