@@ -354,7 +354,9 @@ export const AdminOrders = () => {
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const driverChatMsgs: any[] = Array.isArray(driverChatMsgsRaw) ? driverChatMsgsRaw : (driverChatMsgsRaw?.items ?? []);
-  const dispatchQueueList: any[] = Array.isArray(dispatchQueueData) ? dispatchQueueData : (dispatchQueueData?.items ?? dispatchQueueData?.drivers ?? []);
+  // DispatchQueueRead schema: { generated_at, next_driver, queue: DriverDispatchQueueItem[] }
+  // DriverDispatchQueueItem: { queue_rank, queue_reason, driver: DriverDispatchSummary }
+  const dispatchQueueList: any[] = dispatchQueueData?.queue ?? [];
 
   // Selecting a customer also pre-fills the pickup address with the
   // customer's name — many customers share an address with their own name
@@ -546,21 +548,22 @@ export const AdminOrders = () => {
               <p className="text-sm text-gray-500 text-center py-4">الطابور فارغ حالياً — لا يوجد مناديبون في دور التوزيع.</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {dispatchQueueList.map((d: any, idx: number) => (
+                {dispatchQueueList.map((d: any) => (
                   <div
-                    key={d.id ?? idx}
+                    key={d.driver?.id ?? d.queue_rank}
                     className="flex items-center gap-3 bg-white border border-indigo-100 rounded-lg px-3 py-2 shadow-sm"
                   >
                     <span className="flex-shrink-0 w-7 h-7 bg-indigo-600 text-white text-xs font-black rounded-full flex items-center justify-center">
-                      {idx + 1}
+                      {d.queue_rank}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{d.full_name ?? d.driver?.full_name ?? `#${d.driver_id ?? d.id}`}</p>
-                      <p className="text-xs text-gray-500 truncate" dir="ltr">{d.phone ?? d.driver?.phone ?? ''}</p>
+                      <p className="text-sm font-semibold text-gray-800 truncate">{d.driver?.full_name ?? `#${d.driver?.id}`}</p>
+                      <p className="text-xs text-gray-500 truncate" dir="ltr">{d.driver?.phone ?? ''}</p>
+                      {d.queue_reason && (
+                        <p className="text-[11px] text-indigo-500 truncate">{d.queue_reason}</p>
+                      )}
                     </div>
-                    {d.is_available !== undefined && (
-                      <span className={`flex-shrink-0 inline-block h-2 w-2 rounded-full ${d.is_available ? 'bg-emerald-500' : 'bg-gray-300'}`} />
-                    )}
+                    <span className={`flex-shrink-0 inline-block h-2 w-2 rounded-full ${d.driver?.is_available ? 'bg-emerald-500' : 'bg-gray-300'}`} />
                   </div>
                 ))}
               </div>

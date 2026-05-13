@@ -141,9 +141,9 @@ export const AdminDrivers = () => {
 
   const { data: chatMessagesData, refetch: refetchChat } = useQuery({
     queryKey: ['driver-chat-messages', showDriverChat?.id],
-    queryFn: () => driversApi.getDriverChatMessages(showDriverChat.id),
-    enabled: !!showDriverChat,
-    refetchInterval: showDriverChat ? 8_000 : false,
+    queryFn: () => driversApi.getDriverChatMessages(showDriverChat!.id),
+    enabled: !!chatThreadData,
+    refetchInterval: !!chatThreadData ? 8_000 : false,
   });
 
   const sendChatMutation = useMutation({
