@@ -15,11 +15,17 @@ export const AdminSettings = () => {
   // UI values in minutes; convert to seconds for the backend
   const [offerTimeoutMins, setOfferTimeoutMins] = useState<number | null>(null);
   const [restrictMins, setRestrictMins] = useState<number | null>(null);
+  const [presenceStaleMins, setPresenceStaleMins] = useState<number | null>(null);
+  const [availLockMins, setAvailLockMins] = useState<number | null>(null);
+  const [heartbeatSecs, setHeartbeatSecs] = useState<number | null>(null);
 
   const updateSettingsMutation = useMutation({
     mutationFn: () => settingsApi.update({
       offer_open_timeout_seconds: offerTimeoutMins !== null ? offerTimeoutMins * 60 : undefined,
       driver_restriction_seconds: restrictMins !== null ? restrictMins * 60 : undefined,
+      driver_presence_stale_seconds: presenceStaleMins !== null ? presenceStaleMins * 60 : undefined,
+      driver_availability_change_lock_seconds: availLockMins !== null ? availLockMins * 60 : undefined,
+      driver_presence_heartbeat_min_interval_seconds: heartbeatSecs !== null ? heartbeatSecs : undefined,
     }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
   });
@@ -67,6 +73,51 @@ export const AdminSettings = () => {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 pl-16 text-sm focus:ring-2 focus:ring-emerald-500"
                 />
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">دقيقة</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                وقت انتهاء حضور المندوب
+                <span className="mr-2 text-gray-400 font-normal">الحالي: {Math.round((settings.driver_presence_stale_seconds ?? 0) / 60)} دقيقة</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number" min="1"
+                  defaultValue={Math.round((settings.driver_presence_stale_seconds ?? 300) / 60)}
+                  onChange={e => setPresenceStaleMins(Number(e.target.value))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 pl-16 text-sm focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">دقيقة</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                قفل تغيير حالة توفر المندوب
+                <span className="mr-2 text-gray-400 font-normal">الحالي: {Math.round((settings.driver_availability_change_lock_seconds ?? 0) / 60)} دقيقة</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number" min="0"
+                  defaultValue={Math.round((settings.driver_availability_change_lock_seconds ?? 3600) / 60)}
+                  onChange={e => setAvailLockMins(Number(e.target.value))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 pl-16 text-sm focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">دقيقة</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                الحد الأدنى لفترة إرسال نبضات الحضور
+                <span className="mr-2 text-gray-400 font-normal">الحالي: {settings.driver_presence_heartbeat_min_interval_seconds ?? 0} ثانية</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number" min="5"
+                  defaultValue={settings.driver_presence_heartbeat_min_interval_seconds ?? 30}
+                  onChange={e => setHeartbeatSecs(Number(e.target.value))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 pl-16 text-sm focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">ثانية</span>
               </div>
             </div>
             <button

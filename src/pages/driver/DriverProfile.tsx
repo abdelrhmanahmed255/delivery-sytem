@@ -9,6 +9,7 @@ export const DriverProfile = () => {
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [pwForm, setPwForm] = useState({ current_password: '', new_password: '' });
   const [editForm, setEditForm] = useState<any>({});
+  const [availCooldownUntil, setAvailCooldownUntil] = useState<string | null>(null);
 
   const { data: me, isLoading } = useQuery({
     queryKey: ['driverMe'],
@@ -48,7 +49,18 @@ export const DriverProfile = () => {
 
   const availabilityMutation = useMutation({
     mutationFn: (val: boolean) => driversApi.setAvailability(val),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['driverMe'] }),
+    onSuccess: () => {
+      setAvailCooldownUntil(null);
+      queryClient.invalidateQueries({ queryKey: ['driverMe'] });
+    },
+    onError: (err: any) => {
+      if (err?.response?.status === 409) {
+        const lockedUntil = err.response?.data?.detail?.availability_locked_until
+          ?? err.response?.data?.availability_locked_until
+          ?? null;
+        setAvailCooldownUntil(lockedUntil);
+      }
+    },
   });
 
   if (isLoading) {
@@ -60,6 +72,12 @@ export const DriverProfile = () => {
   }
 
   const isRestricted = me?.restricted_until && new Date(me.restricted_until) > new Date();
+  const lockedUntilDate = availCooldownUntil
+    ? new Date(availCooldownUntil)
+    : me?.availability_locked_until
+    ? new Date(me.availability_locked_until)
+    : null;
+  const isAvailLocked = lockedUntilDate && lockedUntilDate > new Date();
   const statusText = me?.approval_status === 'approved'
     ? { label: 'معتمد', cls: 'bg-green-400 text-white' }
     : me?.approval_status === 'pending'
@@ -71,23 +89,25 @@ export const DriverProfile = () => {
 
       {/* ── Availability — BIG prominent card ─────────────────── */}
       <button
-        onClick={() => !isRestricted && availabilityMutation.mutate(!me?.is_available)}
-        disabled={availabilityMutation.isPending || !!isRestricted}
+        onClick={() => !isRestricted && !isAvailLocked && availabilityMutation.mutate(!me?.is_available)}
+        disabled={availabilityMutation.isPending || !!isRestricted || !!isAvailLocked}
         className={`w-full rounded-2xl p-5 text-white text-right shadow-md transition-all active:scale-[0.98] disabled:opacity-70 ${
-          isRestricted ? 'bg-red-600' : me?.is_available ? 'bg-green-500' : 'bg-gray-700'
+          isRestricted ? 'bg-red-600' : isAvailLocked ? 'bg-amber-600' : me?.is_available ? 'bg-green-500' : 'bg-gray-700'
         }`}
       >
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-sm opacity-75 mb-1">
-              {isRestricted ? 'حسابك موقوف' : 'حالتك — اضغط للتبديل'}
+              {isRestricted ? 'حسابك موقوف' : isAvailLocked ? 'التغيير مقفل مؤقتاً' : 'حالتك — اضغط للتبديل'}
             </p>
             <p className="text-3xl font-black">
-              {isRestricted ? '⛔ موقوف' : me?.is_available ? '🟢 متاح' : '⚫ غير متاح'}
+              {isRestricted ? '⛔ موقوف' : isAvailLocked ? '🔒 مقفل' : me?.is_available ? '🟢 متاح' : '⚫ غير متاح'}
             </p>
             <p className="text-sm opacity-70 mt-1">
               {isRestricted
                 ? `حتى ${new Date(me!.restricted_until).toLocaleString('ar-EG')}`
+                : isAvailLocked
+                ? `لا يمكنك التغيير حتى ${lockedUntilDate!.toLocaleString('ar-EG')}`
                 : me?.is_available
                 ? 'تستقبل الطلبات الآن'
                 : 'اضغط لتفعيل التوفر'}
@@ -97,13 +117,19 @@ export const DriverProfile = () => {
             )}
           </div>
           {/* Toggle indicator */}
-          {!isRestricted && (
+          {!isRestricted && !isAvailLocked && (
             <div className={`flex-shrink-0 relative h-10 w-20 rounded-full border-2 border-white/40 ${me?.is_available ? 'bg-green-400' : 'bg-gray-500'}`}>
               <span className={`absolute top-1 h-8 w-8 rounded-full bg-white shadow-lg transition-all duration-300 ${me?.is_available ? 'left-10' : 'left-1'}`} />
             </div>
           )}
         </div>
       </button>
+      {availCooldownUntil && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+          ⏳ لا يمكنك تغيير حالة التوفر الآن. حاول مرة أخرى بعد{' '}
+          <span className="font-bold">{new Date(availCooldownUntil).toLocaleString('ar-EG')}</span>.
+        </div>
+      )}
 
       {/* ── Profile card ───────────────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

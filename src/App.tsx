@@ -22,6 +22,8 @@ import { AdminSettings } from './pages/admin/AdminSettings';
 import { DriverHome } from './pages/driver/DriverHome';
 import { DriverActiveOrders } from './pages/driver/DriverActiveOrders';
 import { DriverProfile } from './pages/driver/DriverProfile';
+import { DriverDailyHistory } from './pages/driver/DriverDailyHistory';
+import { DriverChat } from './pages/driver/DriverChat';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -59,6 +61,8 @@ function App() {
               <Route path="home" element={<DriverHome />} />
               <Route path="active" element={<DriverActiveOrders />} />
               <Route path="profile" element={<DriverProfile />} />
+              <Route path="history" element={<DriverDailyHistory />} />
+              <Route path="chat" element={<DriverChat />} />
             </Route>
           </Route>
         </Routes>

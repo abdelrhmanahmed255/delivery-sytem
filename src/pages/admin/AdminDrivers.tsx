@@ -47,6 +47,10 @@ export const AdminDrivers = () => {
   const [showShiftClose, setShowShiftClose] = useState<any>(null);
   const [showShiftHistory, setShowShiftHistory] = useState<any>(null);
   const [shiftHistoryOffset, setShiftHistoryOffset] = useState(0);
+  const [showDispatchQueue, setShowDispatchQueue] = useState(false);
+  const [showIdleDrivers, setShowIdleDrivers] = useState(false);
+  const [showDriverChat, setShowDriverChat] = useState<any>(null);
+  const [chatMessage, setChatMessage] = useState('');
   const [rejectNote, setRejectNote] = useState('');
   const [restrictMinutes, setRestrictMinutes] = useState('60');
   const [restrictReason, setRestrictReason] = useState('');
@@ -115,6 +119,38 @@ export const AdminDrivers = () => {
     enabled: !!showShiftHistory,
   });
 
+  const { data: dispatchQueueData, isLoading: dispatchQueueLoading } = useQuery({
+    queryKey: ['dispatch-queue'],
+    queryFn: () => driversApi.getDispatchQueue(),
+    enabled: showDispatchQueue,
+    refetchInterval: showDispatchQueue ? 10_000 : false,
+  });
+
+  const { data: idleDriversData, isLoading: idleDriversLoading } = useQuery({
+    queryKey: ['idle-drivers'],
+    queryFn: () => driversApi.getIdleDrivers({ idle_minutes: 45 }),
+    enabled: showIdleDrivers,
+    refetchInterval: showIdleDrivers ? 30_000 : false,
+  });
+
+  const { data: chatThreadData } = useQuery({
+    queryKey: ['driver-chat-thread', showDriverChat?.id],
+    queryFn: () => driversApi.openDriverChat(showDriverChat.id),
+    enabled: !!showDriverChat,
+  });
+
+  const { data: chatMessagesData, refetch: refetchChat } = useQuery({
+    queryKey: ['driver-chat-messages', showDriverChat?.id],
+    queryFn: () => driversApi.getDriverChatMessages(showDriverChat.id),
+    enabled: !!showDriverChat,
+    refetchInterval: showDriverChat ? 8_000 : false,
+  });
+
+  const sendChatMutation = useMutation({
+    mutationFn: () => driversApi.sendDriverChatMessage(showDriverChat!.id, chatMessage),
+    onSuccess: () => { setChatMessage(''); refetchChat(); },
+  });
+
   const isRestricted = (driver: any) => driver.restricted_until && new Date(driver.restricted_until) > new Date();
 
   return (
@@ -145,6 +181,18 @@ export const AdminDrivers = () => {
             className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
           >
             + إضافة مندوب
+          </button>
+          <button
+            onClick={() => setShowDispatchQueue(true)}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+          >
+            🎯 طابور التوزيع
+          </button>
+          <button
+            onClick={() => setShowIdleDrivers(true)}
+            className="bg-amber-500 hover:bg-amber-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+          >
+            😴 الخاملون
           </button>
         </div>
       </div>
@@ -196,6 +244,7 @@ export const AdminDrivers = () => {
                   )
                 )}
                 <button onClick={() => { setShowShiftHistory(driver); setShiftHistoryOffset(0); }} className="text-xs px-3 py-1.5 rounded-lg bg-gray-50 text-gray-600 border border-gray-200 font-medium">الورديات</button>
+                <button onClick={() => { setShowDriverChat(driver); setChatMessage(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium">💬 محادثة</button>
               </div>
             </div>
           ))}
@@ -305,6 +354,12 @@ export const AdminDrivers = () => {
                         className="text-xs px-2 py-1 rounded-md bg-gray-50 text-gray-600 hover:bg-gray-100 font-medium border border-gray-200"
                       >
                         الورديات
+                      </button>
+                      <button
+                        onClick={() => { setShowDriverChat(driver); setChatMessage(''); }}
+                        className="text-xs px-2 py-1 rounded-md bg-cyan-50 text-cyan-700 hover:bg-cyan-100 font-medium border border-cyan-200"
+                      >
+                        💬 محادثة
                       </button>
                     </div>
                   </td>
@@ -600,6 +655,115 @@ export const AdminDrivers = () => {
                 onPageChange={setShiftHistoryOffset}
               />
             )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Dispatch Queue Modal */}
+      {showDispatchQueue && (
+        <Modal title="طابور التوزيع التلقائي" onClose={() => setShowDispatchQueue(false)}>
+          <div className="space-y-4">
+            {dispatchQueueLoading && <p className="text-center text-gray-400 py-6">جارٍ التحميل...</p>}
+            {dispatchQueueData && (
+              <>
+                {dispatchQueueData.next_driver && (
+                  <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4">
+                    <p className="text-xs text-indigo-500 font-semibold mb-1">المندوب التالي للاستلام</p>
+                    <p className="text-lg font-black text-indigo-800">{dispatchQueueData.next_driver.driver?.full_name}</p>
+                    <p className="text-xs text-indigo-600 mt-1">{dispatchQueueData.next_driver.queue_reason}</p>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {dispatchQueueData.queue?.map((item: any) => (
+                    <div key={item.driver?.id} className="flex items-center justify-between border border-gray-100 rounded-xl px-4 py-3">
+                      <div>
+                        <p className="font-semibold text-gray-800 text-sm">{item.driver?.full_name}</p>
+                        <p className="text-xs text-gray-500">{item.queue_reason}</p>
+                      </div>
+                      <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded-full">#{item.queue_rank}</span>
+                    </div>
+                  ))}
+                  {dispatchQueueData.queue?.length === 0 && (
+                    <p className="text-center text-gray-400 text-sm py-4">الطابور فارغ حالياً.</p>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 text-center">
+                  آخر تحديث: {new Date(dispatchQueueData.generated_at).toLocaleString('ar-EG')}
+                </p>
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Idle Drivers Modal */}
+      {showIdleDrivers && (
+        <Modal title="المناديبون الخاملون (45+ دقيقة)" onClose={() => setShowIdleDrivers(false)}>
+          <div className="space-y-3">
+            {idleDriversLoading && <p className="text-center text-gray-400 py-6">جارٍ التحميل...</p>}
+            {idleDriversData?.length === 0 && <p className="text-center text-gray-400 py-6">لا يوجد مناديبون خاملون حالياً.</p>}
+            {idleDriversData?.map((item: any) => (
+              <div key={item.driver?.id} className="border border-amber-100 bg-amber-50 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-gray-800">{item.driver?.full_name}</p>
+                  <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-1 rounded-full">{Math.round(item.idle_minutes)} دقيقة خمول</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                  {item.last_assigned_at && (
+                    <div><span className="text-gray-400">آخر تعيين: </span>{new Date(item.last_assigned_at).toLocaleString('ar-EG')}</div>
+                  )}
+                  {item.current_shift_opened_at && (
+                    <div><span className="text-gray-400">بداية الوردية: </span>{new Date(item.current_shift_opened_at).toLocaleString('ar-EG')}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {/* Driver Chat Modal */}
+      {showDriverChat && (
+        <Modal title={`محادثة مع ${showDriverChat.full_name}`} onClose={() => { setShowDriverChat(null); setChatMessage(''); }}>
+          <div className="flex flex-col h-[420px]">
+            <div className="flex-1 overflow-y-auto space-y-2 pb-2">
+              {!chatMessagesData && <p className="text-center text-gray-400 py-4 text-sm">جارٍ التحميل...</p>}
+              {chatMessagesData?.length === 0 && <p className="text-center text-gray-400 py-4 text-sm">لا توجد رسائل بعد. ابدأ المحادثة.</p>}
+              {chatMessagesData?.map((msg: any) => (
+                <div
+                  key={msg.id}
+                  className={`flex ${msg.sender_type === 'admin' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div className={`max-w-[80%] px-3 py-2 rounded-xl text-sm ${
+                    msg.sender_type === 'admin'
+                      ? 'bg-cyan-600 text-white rounded-br-sm'
+                      : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                  }`}>
+                    <p>{msg.body}</p>
+                    <p className="text-[10px] opacity-60 mt-0.5">{new Date(msg.created_at).toLocaleTimeString('ar-EG')}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <form
+              className="flex gap-2 pt-2 border-t border-gray-100"
+              onSubmit={e => { e.preventDefault(); if (chatMessage.trim()) sendChatMutation.mutate(); }}
+            >
+              <input
+                type="text"
+                value={chatMessage}
+                onChange={e => setChatMessage(e.target.value)}
+                placeholder="اكتب رسالتك..."
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500"
+              />
+              <button
+                type="submit"
+                disabled={!chatMessage.trim() || sendChatMutation.isPending}
+                className="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {sendChatMutation.isPending ? '...' : 'إرسال'}
+              </button>
+            </form>
           </div>
         </Modal>
       )}

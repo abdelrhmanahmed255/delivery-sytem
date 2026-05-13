@@ -28,6 +28,11 @@ export const activityApi = {
 
 export const settingsApi = {
   get: () => apiClient.get('/admin/settings').then(r => r.data),
-  update: (payload: { offer_open_timeout_seconds?: number; driver_restriction_seconds?: number }) =>
-    apiClient.patch('/admin/settings', payload).then(r => r.data),
+  update: (payload: {
+    offer_open_timeout_seconds?: number;
+    driver_restriction_seconds?: number;
+    driver_presence_stale_seconds?: number;
+    driver_availability_change_lock_seconds?: number;
+    driver_presence_heartbeat_min_interval_seconds?: number;
+  }) => apiClient.patch('/admin/settings', payload).then(r => r.data),
 };

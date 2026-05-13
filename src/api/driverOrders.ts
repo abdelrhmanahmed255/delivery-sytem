@@ -19,6 +19,9 @@ export const driverOrdersApi = {
       return Array.isArray(d) ? d : (d?.items ?? d?.orders ?? []);
     }),
 
+  dailyHistory: () =>
+    apiClient.get('/driver/orders/history/today').then(r => r.data),
+
   pickup: (orderId: number) =>
     apiClient.post(`/driver/orders/${orderId}/pickup`).then(r => r.data),
 

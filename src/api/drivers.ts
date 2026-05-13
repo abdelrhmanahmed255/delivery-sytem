@@ -65,4 +65,31 @@ export const driversApi = {
 
   listShifts: (driverId: number, params?: { limit?: number; offset?: number }) =>
     apiClient.get(`/admin/drivers/${driverId}/shifts`, { params }).then(r => r.data),
+
+  // Dispatch queue & idle drivers (admin)
+  getDispatchQueue: (limit = 100) =>
+    apiClient.get('/admin/drivers/dispatch-queue', { params: { limit } }).then(r => r.data),
+
+  getIdleDrivers: (params?: { idle_minutes?: number; limit?: number }) =>
+    apiClient.get('/admin/drivers/idle', { params }).then(r => r.data),
+
+  // Admin ↔ Driver Chat (admin side)
+  openDriverChat: (driverId: number) =>
+    apiClient.post(`/admin/drivers/${driverId}/chat`).then(r => r.data),
+
+  getDriverChatMessages: (driverId: number, params?: { limit?: number; offset?: number }) =>
+    apiClient.get(`/admin/drivers/${driverId}/chat/messages`, { params }).then(r => r.data),
+
+  sendDriverChatMessage: (driverId: number, body: string) =>
+    apiClient.post(`/admin/drivers/${driverId}/chat/messages`, { body }).then(r => r.data),
+
+  // Driver self — chat
+  getMyChatThread: () =>
+    apiClient.get('/drivers/me/chat').then(r => r.data),
+
+  getMyChatMessages: (params?: { limit?: number; offset?: number }) =>
+    apiClient.get('/drivers/me/chat/messages', { params }).then(r => r.data),
+
+  sendMyChatMessage: (body: string) =>
+    apiClient.post('/drivers/me/chat/messages', { body }).then(r => r.data),
 };

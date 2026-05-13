@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '../../api/orders';
@@ -36,18 +36,31 @@ export const AdminOrders = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showAssign, setShowAssign] = useState<number | null>(null);
+  const [showReassign, setShowReassign] = useState<any | null>(null);
+  const [showUnassign, setShowUnassign] = useState<any | null>(null);
+  const [showEdit, setShowEdit] = useState<any | null>(null);
+  const [showAssignments, setShowAssignments] = useState<number | null>(null);
   const [showCancel, setShowCancel] = useState<number | null>(null);
   const [showOffers, setShowOffers] = useState<number | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [showDetails, setShowDetails] = useState<any | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [assignDriverId, setAssignDriverId] = useState('');
+  const [reassignDriverId, setReassignDriverId] = useState('');
+  const [reassignAllowInProgress, setReassignAllowInProgress] = useState(false);
+  const [unassignReason, setUnassignReason] = useState('');
+  const [editForm, setEditForm] = useState<any>({});
 
   // Quick on-page customer narrow-down (filters the already-loaded today list).
   const [orderCustomerSearch, setOrderCustomerSearch] = useState('');
 
   // Available-drivers banner expand/collapse state.
   const [driversBannerOpen, setDriversBannerOpen] = useState(false);
+  // Dispatch queue expand/collapse.
+  const [dispatchQueueOpen, setDispatchQueueOpen] = useState(false);
+  // Driver chat panel: holds the driver we're chatting with.
+  const [showDriverChat, setShowDriverChat] = useState<{ id: number; name: string } | null>(null);
+  const [driverChatMessage, setDriverChatMessage] = useState('');
 
   // Today's orders are fetched with a wide window so client-side narrowing
   // (status / customer search) has access to the full day without paging.
@@ -280,7 +293,68 @@ export const AdminOrders = () => {
     onSuccess: () => { setShowCancel(null); setCancelReason(''); },
   });
 
+  const reassignMutation = useMutation({
+    mutationFn: () => ordersApi.reassign(showReassign!.id, Number(reassignDriverId), reassignAllowInProgress),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setShowReassign(null);
+      setReassignDriverId('');
+      setReassignAllowInProgress(false);
+    },
+  });
+
+  const unassignMutation = useMutation({
+    mutationFn: () => ordersApi.unassign(showUnassign!.id, unassignReason || undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setShowUnassign(null);
+      setUnassignReason('');
+    },
+  });
+
+  const editOrderMutation = useMutation({
+    mutationFn: () => ordersApi.update(showEdit!.id, {
+      pickup_address: editForm.pickup_address || undefined,
+      pickup_contact: editForm.pickup_contact || undefined,
+      package_description: editForm.package_description || undefined,
+      price: editForm.price !== '' ? editForm.price : undefined,
+      delivery_eta_minutes: editForm.delivery_eta_minutes ? Number(editForm.delivery_eta_minutes) : undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setShowEdit(null);
+    },
+  });
+
+  const sendDriverChatMutation = useMutation({
+    mutationFn: () => driversApi.sendDriverChatMessage(showDriverChat!.id, driverChatMessage.trim()),
+    onSuccess: () => { setDriverChatMessage(''); refetchDriverChat(); },
+  });
+
+  const { data: assignmentsData } = useQuery({
+    queryKey: ['order-assignments', showAssignments],
+    queryFn: () => ordersApi.getAssignments(showAssignments!),
+    enabled: showAssignments !== null,
+  });
+
+  const { data: dispatchQueueData } = useQuery({
+    queryKey: ['dispatch-queue'],
+    queryFn: () => driversApi.getDispatchQueue(50),
+    refetchInterval: 20_000,
+  });
+
+  const { data: driverChatMsgsRaw, refetch: refetchDriverChat } = useQuery({
+    queryKey: ['admin-driver-chat', showDriverChat?.id],
+    queryFn: () => driversApi.getDriverChatMessages(showDriverChat!.id, { limit: 100 }),
+    enabled: showDriverChat !== null,
+    refetchInterval: 5_000,
+  });
+
   const activeDrivers = driversData?.items?.filter((d: any) => d.approval_status === 'approved' && d.is_available && d.is_active) ?? [];
+
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const driverChatMsgs: any[] = Array.isArray(driverChatMsgsRaw) ? driverChatMsgsRaw : (driverChatMsgsRaw?.items ?? []);
+  const dispatchQueueList: any[] = Array.isArray(dispatchQueueData) ? dispatchQueueData : (dispatchQueueData?.items ?? dispatchQueueData?.drivers ?? []);
 
   // Selecting a customer also pre-fills the pickup address with the
   // customer's name — many customers share an address with their own name
@@ -337,6 +411,19 @@ export const AdminOrders = () => {
   const lastUpdatedLabel = dataUpdatedAt > 0
     ? new Date(dataUpdatedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '';
+
+  // Open the driver chat thread the first time the modal appears.
+  useEffect(() => {
+    if (showDriverChat) {
+      driversApi.openDriverChat(showDriverChat.id).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDriverChat?.id]);
+
+  // Keep the chat window scrolled to the latest message.
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [driverChatMsgs.length]);
 
   return (
     <div className="space-y-6">
@@ -426,6 +513,58 @@ export const AdminOrders = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Dispatch Queue */}
+      <div className="bg-gradient-to-l from-indigo-50 via-blue-50 to-white border border-indigo-100 rounded-xl shadow-sm overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setDispatchQueueOpen(o => !o)}
+          className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-indigo-50/70 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-lg">🔄</span>
+            <div className="text-right">
+              <p className="text-sm font-bold text-indigo-800">
+                طابور التوزيع التلقائي
+                {dispatchQueueList.length > 0 && (
+                  <span className="mr-2 text-indigo-600">({dispatchQueueList.length} مندوب)</span>
+                )}
+              </p>
+              <p className="text-xs text-gray-500">ترتيب المناديبين للحصول على الطلبات التلقائية القادمة</p>
+            </div>
+          </div>
+          <span className="text-indigo-700 text-xs font-semibold flex-shrink-0">
+            {dispatchQueueOpen ? 'إخفاء ▴' : 'عرض ▾'}
+          </span>
+        </button>
+        {dispatchQueueOpen && (
+          <div className="px-4 pb-4 pt-2 border-t border-indigo-100">
+            {dispatchQueueList.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4">الطابور فارغ حالياً — لا يوجد مناديبون في دور التوزيع.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {dispatchQueueList.map((d: any, idx: number) => (
+                  <div
+                    key={d.id ?? idx}
+                    className="flex items-center gap-3 bg-white border border-indigo-100 rounded-lg px-3 py-2 shadow-sm"
+                  >
+                    <span className="flex-shrink-0 w-7 h-7 bg-indigo-600 text-white text-xs font-black rounded-full flex items-center justify-center">
+                      {idx + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{d.full_name ?? d.driver?.full_name ?? `#${d.driver_id ?? d.id}`}</p>
+                      <p className="text-xs text-gray-500 truncate" dir="ltr">{d.phone ?? d.driver?.phone ?? ''}</p>
+                    </div>
+                    {d.is_available !== undefined && (
+                      <span className={`flex-shrink-0 inline-block h-2 w-2 rounded-full ${d.is_available ? 'bg-emerald-500' : 'bg-gray-300'}`} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -520,17 +659,38 @@ export const AdminOrders = () => {
                 </button>
               )}
               <div className="flex items-center justify-between text-xs text-gray-500">
-                <span>المندوب: {order.assigned_driver?.full_name ?? '—'}</span>
-                <span>{order.delivery_eta_minutes} د</span>
+                <div className="flex items-center gap-2">
+                  <span>المندوب: <span className="font-medium text-gray-700">{order.assigned_driver?.full_name ?? '—'}</span></span>
+                  {order.assigned_driver && (
+                    <button
+                      onClick={() => setShowDriverChat({ id: order.assigned_driver.id, name: order.assigned_driver.full_name })}
+                      title={`محادثة مع ${order.assigned_driver.full_name}`}
+                      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 font-bold hover:bg-cyan-200 active:bg-cyan-300 transition-colors border border-cyan-200"
+                    >
+                      💬 محادثة
+                    </button>
+                  )}
+                </div>
+                <span className="bg-gray-100 px-2 py-0.5 rounded-full">{order.delivery_eta_minutes} د</span>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => setShowDetails(order)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 font-semibold border border-gray-200">تفاصيل</button>
-                <button onClick={() => setShowOffers(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium">العروض</button>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button onClick={() => setShowDetails(order)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 font-semibold border border-gray-200 hover:bg-gray-200 transition-colors">تفاصيل</button>
+                <button onClick={() => setShowOffers(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium border border-blue-100 hover:bg-blue-100 transition-colors">العروض</button>
+                <button onClick={() => setShowAssignments(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-purple-50 text-purple-700 font-medium border border-purple-100 hover:bg-purple-100 transition-colors">السجل</button>
                 {['pending', 'offered'].includes(order.status) && (
-                  <button onClick={() => { setShowAssign(order.id); setAssignDriverId(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium">تعيين مندوب</button>
+                  <button onClick={() => { setShowAssign(order.id); setAssignDriverId(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium border border-indigo-100 hover:bg-indigo-100 transition-colors">تعيين مندوب</button>
+                )}
+                {['assigned', 'in_progress'].includes(order.status) && (
+                  <button onClick={() => { setShowReassign(order); setReassignDriverId(''); setReassignAllowInProgress(false); }} className="text-xs px-3 py-1.5 rounded-lg bg-orange-50 text-orange-700 font-medium border border-orange-100 hover:bg-orange-100 transition-colors">إعادة تعيين</button>
+                )}
+                {['assigned'].includes(order.status) && (
+                  <button onClick={() => { setShowUnassign(order); setUnassignReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-yellow-50 text-yellow-700 font-medium border border-yellow-100 hover:bg-yellow-100 transition-colors">إلغاء تعيين</button>
                 )}
                 {!['completed', 'cancelled', 'expired'].includes(order.status) && (
-                  <button onClick={() => { setShowCancel(order.id); setCancelReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 font-medium">إلغاء</button>
+                  <button onClick={() => { setShowEdit(order); setEditForm({ pickup_address: order.pickup_address, pickup_contact: order.pickup_contact ?? '', package_description: order.package_description ?? '', price: order.price, delivery_eta_minutes: String(order.delivery_eta_minutes) }); }} className="text-xs px-3 py-1.5 rounded-lg bg-teal-50 text-teal-700 font-medium border border-teal-100 hover:bg-teal-100 transition-colors">تعديل</button>
+                )}
+                {!['completed', 'cancelled', 'expired'].includes(order.status) && (
+                  <button onClick={() => { setShowCancel(order.id); setCancelReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 font-medium border border-red-100 hover:bg-red-100 transition-colors">إلغاء</button>
                 )}
               </div>
             </div>
@@ -582,36 +742,80 @@ export const AdminOrders = () => {
                     {order.pickup_address}
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={order.status} /></td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{order.assigned_driver?.full_name ?? '—'}</td>
+                  <td className="px-4 py-3">
+                    {order.assigned_driver ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm text-gray-700 font-medium truncate max-w-[100px]">{order.assigned_driver.full_name}</span>
+                        <button
+                          onClick={() => setShowDriverChat({ id: order.assigned_driver.id, name: order.assigned_driver.full_name })}
+                          title={`محادثة مع ${order.assigned_driver.full_name}`}
+                          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-cyan-100 hover:bg-cyan-200 text-sm transition-colors border border-cyan-200"
+                        >
+                          💬
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm font-semibold text-gray-900">{order.price} ج.م</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{order.delivery_eta_minutes} د</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1 flex-wrap">
                       <button
                         onClick={() => setShowDetails(order)}
-                        className="text-xs px-2 py-1 rounded-md bg-gray-50 text-gray-700 hover:bg-gray-100 font-medium border border-gray-200"
-                        title="عرض كل تفاصيل الطلب"
+                        className="text-xs px-2.5 py-1 rounded-md bg-gray-50 text-gray-700 hover:bg-gray-100 font-medium border border-gray-200 transition-colors whitespace-nowrap"
                       >
                         تفاصيل
                       </button>
                       <button
                         onClick={() => setShowOffers(order.id)}
-                        className="text-xs px-2 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium"
+                        className="text-xs px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium border border-blue-100 transition-colors whitespace-nowrap"
                       >
                         العروض
+                      </button>
+                      <button
+                        onClick={() => setShowAssignments(order.id)}
+                        className="text-xs px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 font-medium border border-purple-100 transition-colors whitespace-nowrap"
+                      >
+                        السجل
                       </button>
                       {['pending', 'offered'].includes(order.status) && (
                         <button
                           onClick={() => { setShowAssign(order.id); setAssignDriverId(''); }}
-                          className="text-xs px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium"
+                          className="text-xs px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium border border-indigo-100 transition-colors whitespace-nowrap"
                         >
                           تعيين
+                        </button>
+                      )}
+                      {['assigned', 'in_progress'].includes(order.status) && (
+                        <button
+                          onClick={() => { setShowReassign(order); setReassignDriverId(''); setReassignAllowInProgress(false); }}
+                          className="text-xs px-2.5 py-1 rounded-md bg-orange-50 text-orange-700 hover:bg-orange-100 font-medium border border-orange-100 transition-colors whitespace-nowrap"
+                        >
+                          إعادة تعيين
+                        </button>
+                      )}
+                      {['assigned'].includes(order.status) && (
+                        <button
+                          onClick={() => { setShowUnassign(order); setUnassignReason(''); }}
+                          className="text-xs px-2.5 py-1 rounded-md bg-yellow-50 text-yellow-700 hover:bg-yellow-100 font-medium border border-yellow-100 transition-colors whitespace-nowrap"
+                        >
+                          إلغاء تعيين
+                        </button>
+                      )}
+                      {!['completed', 'cancelled', 'expired'].includes(order.status) && (
+                        <button
+                          onClick={() => { setShowEdit(order); setEditForm({ pickup_address: order.pickup_address, pickup_contact: order.pickup_contact ?? '', package_description: order.package_description ?? '', price: order.price, delivery_eta_minutes: String(order.delivery_eta_minutes) }); }}
+                          className="text-xs px-2.5 py-1 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 font-medium border border-teal-100 transition-colors whitespace-nowrap"
+                        >
+                          تعديل
                         </button>
                       )}
                       {!['completed', 'cancelled', 'expired'].includes(order.status) && (
                         <button
                           onClick={() => { setShowCancel(order.id); setCancelReason(''); }}
-                          className="text-xs px-2 py-1 rounded-md bg-red-50 text-red-700 hover:bg-red-100 font-medium"
+                          className="text-xs px-2.5 py-1 rounded-md bg-red-50 text-red-700 hover:bg-red-100 font-medium border border-red-100 transition-colors whitespace-nowrap"
                         >
                           إلغاء
                         </button>
@@ -974,6 +1178,222 @@ export const AdminOrders = () => {
                 </div>
               );
             })}
+          </div>
+        </Modal>
+      )}
+
+      {/* Reassign Order Modal */}
+      {showReassign !== null && (
+        <Modal title={`إعادة تعيين الطلب #${showReassign?.id}`} onClose={() => reassignMutation.isPending ? null : setShowReassign(null)}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 bg-orange-50 border border-orange-100 rounded-lg p-3">
+              المندوب الحالي: <span className="font-bold">{showReassign?.assigned_driver?.full_name ?? '—'}</span>
+            </p>
+            <select
+              value={reassignDriverId}
+              onChange={e => setReassignDriverId(e.target.value)}
+              disabled={reassignMutation.isPending}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 disabled:bg-gray-50"
+            >
+              <option value="">اختر المندوب الجديد...</option>
+              {driversData?.items?.filter((d: any) => d.approval_status === 'approved' && d.is_active).map((d: any) => (
+                <option key={d.id} value={d.id}>{d.full_name} — {d.phone} {d.is_available ? '(متاح)' : '(غير متاح)'}</option>
+              ))}
+            </select>
+            {showReassign?.status === 'in_progress' && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reassignAllowInProgress}
+                  onChange={e => setReassignAllowInProgress(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="text-sm text-gray-700">السماح بإعادة التعيين رغم أن الطلب جارٍ تنفيذه</span>
+              </label>
+            )}
+            {reassignMutation.isError && (
+              <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">
+                ❌ فشل إعادة التعيين. تحقق من الشروط وحاول مرة أخرى.
+              </p>
+            )}
+            <button
+              onClick={() => reassignMutation.mutate()}
+              disabled={!reassignDriverId || reassignMutation.isPending || (showReassign?.status === 'in_progress' && !reassignAllowInProgress)}
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {reassignMutation.isPending && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {reassignMutation.isPending ? 'جارٍ إعادة التعيين...' : 'تأكيد إعادة التعيين'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Unassign Order Modal */}
+      {showUnassign !== null && (
+        <Modal title={`إلغاء تعيين طلب #${showUnassign?.id}`} onClose={() => unassignMutation.isPending ? null : setShowUnassign(null)}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 bg-yellow-50 border border-yellow-100 rounded-lg p-3">
+              إلغاء تعيين المندوب: <span className="font-bold">{showUnassign?.assigned_driver?.full_name ?? '—'}</span>
+              <br />
+              <span className="text-xs text-gray-500">سيعود الطلب إلى قائمة الانتظار للتوزيع التلقائي.</span>
+            </p>
+            <textarea
+              value={unassignReason}
+              onChange={e => setUnassignReason(e.target.value)}
+              rows={2}
+              disabled={unassignMutation.isPending}
+              placeholder="سبب إلغاء التعيين (اختياري)..."
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-50"
+            />
+            {unassignMutation.isError && (
+              <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">
+                ❌ فشل إلغاء التعيين. لا يمكن إلغاء تعيين طلب جارٍ تنفيذه.
+              </p>
+            )}
+            <button
+              onClick={() => unassignMutation.mutate()}
+              disabled={unassignMutation.isPending}
+              className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {unassignMutation.isPending && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {unassignMutation.isPending ? 'جارٍ إلغاء التعيين...' : 'تأكيد إلغاء التعيين'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Edit Order Modal */}
+      {showEdit !== null && (
+        <Modal title={`تعديل الطلب #${showEdit?.id}`} onClose={() => editOrderMutation.isPending ? null : setShowEdit(null)}>
+          <form className="space-y-4" onSubmit={e => { e.preventDefault(); editOrderMutation.mutate(); }}>
+            <p className="text-xs text-teal-700 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
+              ✅ التعديل لا يؤثر على التعيين أو المؤقتات أو سير العمل.
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">عنوان الاستلام</label>
+              <input type="text" value={editForm.pickup_address ?? ''} onChange={e => setEditForm((f: any) => ({ ...f, pickup_address: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">جهة الاتصال عند الاستلام</label>
+              <input type="text" value={editForm.pickup_contact ?? ''} onChange={e => setEditForm((f: any) => ({ ...f, pickup_contact: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">وصف الطرد</label>
+              <textarea rows={2} value={editForm.package_description ?? ''} onChange={e => setEditForm((f: any) => ({ ...f, package_description: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">السعر (ج.م)</label>
+                <input type="number" min="0" step="0.01" value={editForm.price ?? ''} onChange={e => setEditForm((f: any) => ({ ...f, price: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">الوقت المتوقع (دقائق)</label>
+                <select value={editForm.delivery_eta_minutes ?? ''} onChange={e => setEditForm((f: any) => ({ ...f, delivery_eta_minutes: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500">
+                  {ETA_OPTIONS.map(v => <option key={v} value={v}>{v} دقيقة</option>)}
+                </select>
+              </div>
+            </div>
+            {editOrderMutation.isError && (
+              <p className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">❌ فشل التعديل. حاول مرة أخرى.</p>
+            )}
+            <button type="submit" disabled={editOrderMutation.isPending}
+              className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+              {editOrderMutation.isPending && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {editOrderMutation.isPending ? 'جارٍ التعديل...' : 'حفظ التعديلات'}
+            </button>
+          </form>
+        </Modal>
+      )}
+
+      {/* Assignment History Modal */}
+      {showAssignments !== null && (
+        <Modal title={`سجل التعيينات — طلب #${showAssignments}`} onClose={() => setShowAssignments(null)}>
+          <div className="space-y-3">
+            {!assignmentsData && <p className="text-sm text-gray-400 text-center py-4">جارٍ التحميل...</p>}
+            {assignmentsData?.length === 0 && <p className="text-sm text-gray-500 text-center py-4">لا يوجد سجل تعيينات لهذا الطلب.</p>}
+            {assignmentsData?.map((a: any) => (
+              <div key={a.id} className="border border-gray-100 rounded-xl p-3 space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-gray-800">{a.driver?.full_name ?? `مندوب #${a.driver_id}`}</span>
+                  <span className="text-xs text-gray-400">{a.assigned_via ?? '—'}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1 text-xs text-gray-500">
+                  <div><span className="text-gray-400">تعيين: </span>{a.assigned_at ? new Date(a.assigned_at).toLocaleString('ar-EG') : '—'}</div>
+                  <div><span className="text-gray-400">إلغاء: </span>{a.unassigned_at ? new Date(a.unassigned_at).toLocaleString('ar-EG') : <span className="text-green-600 font-semibold">نشط</span>}</div>
+                  {a.unassigned_reason && <div className="col-span-2"><span className="text-gray-400">السبب: </span>{a.unassigned_reason}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {/* Driver Chat Modal */}
+      {showDriverChat && (
+        <Modal
+          title={`💬 محادثة مع ${showDriverChat.name}`}
+          onClose={() => { setShowDriverChat(null); setDriverChatMessage(''); }}
+        >
+          <div className="flex flex-col" style={{ height: '60vh' }}>
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 rounded-xl mb-3 min-h-0">
+              {driverChatMsgs.length === 0 && (
+                <div className="text-center py-10">
+                  <p className="text-2xl mb-2">💬</p>
+                  <p className="text-gray-500 text-sm">لا توجد رسائل بعد.</p>
+                  <p className="text-gray-400 text-xs mt-1">ابدأ المحادثة مع المندوب.</p>
+                </div>
+              )}
+              {driverChatMsgs.map((msg: any) => (
+                <div
+                  key={msg.id}
+                  className={`flex ${msg.sender_type === 'admin' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm shadow-sm ${
+                      msg.sender_type === 'admin'
+                        ? 'bg-blue-600 text-white rounded-br-sm'
+                        : 'bg-white text-gray-800 border border-gray-100 rounded-bl-sm'
+                    }`}
+                  >
+                    {msg.sender_type !== 'admin' && (
+                      <p className="text-[10px] font-bold text-gray-400 mb-0.5">{showDriverChat.name}</p>
+                    )}
+                    <p>{msg.body}</p>
+                    <p className={`text-[10px] mt-0.5 ${msg.sender_type === 'admin' ? 'text-blue-200' : 'text-gray-400'}`}>
+                      {new Date(msg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              <div ref={chatBottomRef} />
+            </div>
+            {/* Input */}
+            <form
+              className="flex gap-2 flex-shrink-0"
+              onSubmit={e => { e.preventDefault(); if (driverChatMessage.trim()) sendDriverChatMutation.mutate(); }}
+            >
+              <input
+                type="text"
+                value={driverChatMessage}
+                onChange={e => setDriverChatMessage(e.target.value)}
+                placeholder="اكتب رسالة للمندوب..."
+                className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                autoFocus
+              />
+              <button
+                type="submit"
+                disabled={!driverChatMessage.trim() || sendDriverChatMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold px-5 py-2.5 rounded-xl transition-colors disabled:opacity-50"
+              >
+                {sendDriverChatMutation.isPending ? '...' : '↑'}
+              </button>
+            </form>
           </div>
         </Modal>
       )}
