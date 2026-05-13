@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useDarkMode } from '../utils/useDarkMode';
+import { AdminNotificationBell } from './AdminNotificationBell';
 
 export const AdminLayout = () => {
   const logout = useAuthStore((state) => state.logout);
@@ -27,15 +28,18 @@ export const AdminLayout = () => {
       <aside className="w-64 bg-white shadow-xl hidden md:flex flex-col flex-shrink-0">
         <div className="p-6 border-b border-gray-100 flex items-center justify-between gap-2">
           <h1 className="text-2xl font-bold text-gray-800">بوابة المسؤول</h1>
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label={isDark ? 'التحويل إلى الوضع الفاتح' : 'التحويل إلى الوضع الداكن'}
-            title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
-            className="text-xl leading-none px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
-          >
-            {isDark ? '☀️' : '🌙'}
-          </button>
+          <div className="flex items-center gap-1">
+            <AdminNotificationBell />
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label={isDark ? 'التحويل إلى الوضع الفاتح' : 'التحويل إلى الوضع الداكن'}
+              title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
+              className="text-xl leading-none px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              {isDark ? '☀️' : '🌙'}
+            </button>
+          </div>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             {navItems.map((item) => (
@@ -69,6 +73,7 @@ export const AdminLayout = () => {
         <header className="bg-white shadow relative z-10 md:hidden p-4 font-bold text-gray-800 flex justify-between items-center flex-shrink-0">
             <span className="text-lg">بوابة المسؤول</span>
             <div className="flex items-center gap-2">
+              <AdminNotificationBell />
               <button
                 type="button"
                 onClick={toggle}

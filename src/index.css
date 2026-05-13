@@ -192,5 +192,24 @@ html, body, #root {
 .dark .admin-scope .text-rose-700 { color: #fda4af; }
 
 /* ── Gradient surfaces (driver-name banner on AdminDrivers, etc.) ────────── */
-/* Tailwind gradients are inline-defined via classes — they keep their light
-   colors. They render fine on dark surfaces. No override needed. */
+/* ── Gradient stop overrides ────────────────────────────────────────────────
+   Tailwind v4 gradient utilities set --tw-gradient-from / --tw-gradient-via /
+   --tw-gradient-to. The bg-* overrides above don't affect gradient stops, so
+   we patch them here for the colours that appear in gradient banners.          */
+.dark .admin-scope .from-white      { --tw-gradient-from: #1f2937; }
+.dark .admin-scope .from-gray-50    { --tw-gradient-from: #1f2937; }
+.dark .admin-scope .from-indigo-50  { --tw-gradient-from: rgba(99, 102, 241, 0.18); }
+.dark .admin-scope .from-blue-50    { --tw-gradient-from: rgba(59, 130, 246, 0.15); }
+.dark .admin-scope .from-emerald-50 { --tw-gradient-from: rgba(16, 185, 129, 0.15); }
+
+.dark .admin-scope .via-white      { --tw-gradient-via: #1f2937; }
+.dark .admin-scope .via-gray-50    { --tw-gradient-via: #1f2937; }
+.dark .admin-scope .via-indigo-50  { --tw-gradient-via: rgba(99, 102, 241, 0.18); }
+.dark .admin-scope .via-blue-50    { --tw-gradient-via: rgba(59, 130, 246, 0.15); }
+.dark .admin-scope .via-emerald-50 { --tw-gradient-via: rgba(16, 185, 129, 0.15); }
+
+.dark .admin-scope .to-white      { --tw-gradient-to: #1f2937; }
+.dark .admin-scope .to-gray-50    { --tw-gradient-to: #1f2937; }
+.dark .admin-scope .to-indigo-50  { --tw-gradient-to: rgba(99, 102, 241, 0.18); }
+.dark .admin-scope .to-blue-50    { --tw-gradient-to: rgba(59, 130, 246, 0.15); }
+.dark .admin-scope .to-emerald-50 { --tw-gradient-to: rgba(16, 185, 129, 0.15); }
