@@ -317,8 +317,8 @@ export const AdminOrders = () => {
       pickup_address: editForm.pickup_address || undefined,
       pickup_contact: editForm.pickup_contact || undefined,
       package_description: editForm.package_description || undefined,
-      price: editForm.price !== '' ? editForm.price : undefined,
-      delivery_eta_minutes: editForm.delivery_eta_minutes ? Number(editForm.delivery_eta_minutes) : undefined,
+      price: editForm.price != null && editForm.price !== '' ? editForm.price : undefined,
+      delivery_eta_minutes: parseInt(editForm.delivery_eta_minutes, 10) > 0 ? parseInt(editForm.delivery_eta_minutes, 10) : undefined,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
@@ -329,6 +329,13 @@ export const AdminOrders = () => {
   const sendDriverChatMutation = useMutation({
     mutationFn: () => driversApi.sendDriverChatMessage(showDriverChat!.id, driverChatMessage.trim()),
     onSuccess: () => { setDriverChatMessage(''); refetchDriverChat(); },
+  });
+
+  const { data: driverChatThread } = useQuery({
+    queryKey: ['admin-order-driver-chat-thread', showDriverChat?.id],
+    queryFn: () => driversApi.openDriverChat(showDriverChat!.id),
+    enabled: !!showDriverChat,
+    staleTime: Infinity,
   });
 
   const { data: assignmentsData } = useQuery({
@@ -346,8 +353,8 @@ export const AdminOrders = () => {
   const { data: driverChatMsgsRaw, refetch: refetchDriverChat } = useQuery({
     queryKey: ['admin-driver-chat', showDriverChat?.id],
     queryFn: () => driversApi.getDriverChatMessages(showDriverChat!.id, { limit: 100 }),
-    enabled: showDriverChat !== null,
-    refetchInterval: 5_000,
+    enabled: !!driverChatThread,
+    refetchInterval: !!driverChatThread ? 5_000 : false,
   });
 
   const activeDrivers = driversData?.items?.filter((d: any) => d.approval_status === 'approved' && d.is_available && d.is_active) ?? [];
@@ -414,13 +421,7 @@ export const AdminOrders = () => {
     ? new Date(dataUpdatedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '';
 
-  // Open the driver chat thread the first time the modal appears.
-  useEffect(() => {
-    if (showDriverChat) {
-      driversApi.openDriverChat(showDriverChat.id).catch(() => {});
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showDriverChat?.id]);
+
 
   // Keep the chat window scrolled to the latest message.
   useEffect(() => {
@@ -1379,7 +1380,7 @@ export const AdminOrders = () => {
             {/* Input */}
             <form
               className="flex gap-2 flex-shrink-0"
-              onSubmit={e => { e.preventDefault(); if (driverChatMessage.trim()) sendDriverChatMutation.mutate(); }}
+              onSubmit={e => { e.preventDefault(); if (driverChatMessage.trim() && driverChatThread) sendDriverChatMutation.mutate(); }}
             >
               <input
                 type="text"
@@ -1391,7 +1392,7 @@ export const AdminOrders = () => {
               />
               <button
                 type="submit"
-                disabled={!driverChatMessage.trim() || sendDriverChatMutation.isPending}
+                disabled={!driverChatMessage.trim() || sendDriverChatMutation.isPending || !driverChatThread}
                 className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold px-5 py-2.5 rounded-xl transition-colors disabled:opacity-50"
               >
                 {sendDriverChatMutation.isPending ? '...' : '↑'}

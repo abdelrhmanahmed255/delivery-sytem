@@ -758,7 +758,7 @@ export const AdminDrivers = () => {
               />
               <button
                 type="submit"
-                disabled={!chatMessage.trim() || sendChatMutation.isPending}
+                disabled={!chatMessage.trim() || sendChatMutation.isPending || !chatThreadData}
                 className="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
               >
                 {sendChatMutation.isPending ? '...' : 'إرسال'}
