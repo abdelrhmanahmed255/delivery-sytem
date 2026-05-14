@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '../../api/orders';
@@ -56,11 +56,8 @@ export const AdminOrders = () => {
 
   // Available-drivers banner expand/collapse state.
   const [driversBannerOpen, setDriversBannerOpen] = useState(false);
-  // Dispatch queue expand/collapse.
-  const [dispatchQueueOpen, setDispatchQueueOpen] = useState(false);
-  // Driver chat panel: holds the driver we're chatting with.
-  const [showDriverChat, setShowDriverChat] = useState<{ id: number; name: string } | null>(null);
-  const [driverChatMessage, setDriverChatMessage] = useState('');
+  // Dispatch-queue banner expand/collapse state.
+  const [dispatchBannerOpen, setDispatchBannerOpen] = useState(true);
 
   // Today's orders are fetched with a wide window so client-side narrowing
   // (status / customer search) has access to the full day without paging.
@@ -111,6 +108,12 @@ export const AdminOrders = () => {
     queryKey: ['drivers-list-all'],
     queryFn: () => driversApi.list({ limit: 200 }),
     refetchInterval: 30_000,
+  });
+
+  const { data: dispatchQueueData } = useQuery({
+    queryKey: ['dispatch-queue-orders'],
+    queryFn: () => driversApi.getDispatchQueue(),
+    refetchInterval: 15_000,
   });
 
   // Live (digit-by-digit) phone search. We hit the customers API as soon as
@@ -317,25 +320,13 @@ export const AdminOrders = () => {
       pickup_address: editForm.pickup_address || undefined,
       pickup_contact: editForm.pickup_contact || undefined,
       package_description: editForm.package_description || undefined,
-      price: editForm.price != null && editForm.price !== '' ? editForm.price : undefined,
-      delivery_eta_minutes: parseInt(editForm.delivery_eta_minutes, 10) > 0 ? parseInt(editForm.delivery_eta_minutes, 10) : undefined,
+      price: editForm.price !== '' ? editForm.price : undefined,
+      delivery_eta_minutes: editForm.delivery_eta_minutes ? Number(editForm.delivery_eta_minutes) : undefined,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       setShowEdit(null);
     },
-  });
-
-  const sendDriverChatMutation = useMutation({
-    mutationFn: () => driversApi.sendDriverChatMessage(showDriverChat!.id, driverChatMessage.trim()),
-    onSuccess: () => { setDriverChatMessage(''); refetchDriverChat(); },
-  });
-
-  const { data: driverChatThread } = useQuery({
-    queryKey: ['admin-order-driver-chat-thread', showDriverChat?.id],
-    queryFn: () => driversApi.openDriverChat(showDriverChat!.id),
-    enabled: !!showDriverChat,
-    staleTime: Infinity,
   });
 
   const { data: assignmentsData } = useQuery({
@@ -344,26 +335,7 @@ export const AdminOrders = () => {
     enabled: showAssignments !== null,
   });
 
-  const { data: dispatchQueueData } = useQuery({
-    queryKey: ['dispatch-queue'],
-    queryFn: () => driversApi.getDispatchQueue(50),
-    refetchInterval: 20_000,
-  });
-
-  const { data: driverChatMsgsRaw, refetch: refetchDriverChat } = useQuery({
-    queryKey: ['admin-driver-chat', showDriverChat?.id],
-    queryFn: () => driversApi.getDriverChatMessages(showDriverChat!.id, { limit: 100 }),
-    enabled: !!driverChatThread,
-    refetchInterval: !!driverChatThread ? 5_000 : false,
-  });
-
   const activeDrivers = driversData?.items?.filter((d: any) => d.approval_status === 'approved' && d.is_available && d.is_active) ?? [];
-
-  const chatBottomRef = useRef<HTMLDivElement>(null);
-  const driverChatMsgs: any[] = Array.isArray(driverChatMsgsRaw) ? driverChatMsgsRaw : (driverChatMsgsRaw?.items ?? []);
-  // DispatchQueueRead schema: { generated_at, next_driver, queue: DriverDispatchQueueItem[] }
-  // DriverDispatchQueueItem: { queue_rank, queue_reason, driver: DriverDispatchSummary }
-  const dispatchQueueList: any[] = dispatchQueueData?.queue ?? [];
 
   // Selecting a customer also pre-fills the pickup address with the
   // customer's name — many customers share an address with their own name
@@ -421,13 +393,6 @@ export const AdminOrders = () => {
     ? new Date(dataUpdatedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '';
 
-
-
-  // Keep the chat window scrolled to the latest message.
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [driverChatMsgs.length]);
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -469,6 +434,7 @@ export const AdminOrders = () => {
           </button>
         </div>
       </div>
+
 
       {/* Available drivers banner */}
       <div className="bg-gradient-to-l from-emerald-50 via-green-50 to-white dark:from-emerald-900/30 dark:via-emerald-900/15 dark:to-gray-800 border border-emerald-100 rounded-xl shadow-sm overflow-hidden">
@@ -520,59 +486,154 @@ export const AdminOrders = () => {
         )}
       </div>
 
-      {/* Dispatch Queue */}
-      <div className="bg-gradient-to-l from-indigo-50 via-blue-50 to-white border border-indigo-100 rounded-xl shadow-sm overflow-hidden">
+      {/* Dispatch queue banner */}
+      {/* ── Dispatch Queue Banner ─────────────────────────────────────────── */}
+      <div className="rounded-2xl overflow-hidden shadow-xl" style={{ border: '1px solid rgba(139,92,246,0.35)' }}>
+        {/* Header — always visible */}
         <button
           type="button"
-          onClick={() => setDispatchQueueOpen(o => !o)}
-          className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-indigo-50/70 transition-colors"
+          onClick={() => setDispatchBannerOpen(o => !o)}
+          className="w-full bg-gradient-to-l from-violet-700 via-indigo-600 to-blue-700 px-5 py-4 flex items-center justify-between gap-3 hover:brightness-110 active:brightness-95 transition-all"
         >
-          <div className="flex items-center gap-3">
-            <span className="text-lg">🔄</span>
-            <div className="text-right">
-              <p className="text-sm font-bold text-indigo-800">
-                طابور التوزيع التلقائي
-                {dispatchQueueList.length > 0 && (
-                  <span className="mr-2 text-indigo-600">({dispatchQueueList.length} مندوب)</span>
-                )}
-              </p>
-              <p className="text-xs text-gray-500">ترتيب المناديبين للحصول على الطلبات التلقائية القادمة</p>
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Live pulse dot */}
+            <span className="relative flex-shrink-0 flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-60 animate-ping" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-white" />
+            </span>
+            <div className="text-right min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-white font-black text-base tracking-tight">🎯 طابور التوزيع التلقائي</span>
+                <span className="bg-white/25 backdrop-blur-sm text-white text-xs font-black px-2.5 py-0.5 rounded-full">
+                  {dispatchQueueData?.queue?.length ?? 0} مندوب
+                </span>
+              </div>
+              {dispatchQueueData?.next_driver ? (
+                <p className="text-violet-100 text-xs mt-0.5 truncate">
+                  التالي للاستلام:{' '}
+                  <span className="text-white font-bold">{dispatchQueueData.next_driver.driver?.full_name}</span>
+                </p>
+              ) : (
+                <p className="text-violet-200 text-xs mt-0.5">لا يوجد مندوب متاح حالياً للطابور</p>
+              )}
             </div>
           </div>
-          <span className="text-indigo-700 text-xs font-semibold flex-shrink-0">
-            {dispatchQueueOpen ? 'إخفاء ▴' : 'عرض ▾'}
-          </span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {dispatchQueueData?.generated_at && (
+              <span className="text-violet-200 text-xs hidden sm:block">
+                آخر تحديث: {new Date(dispatchQueueData.generated_at).toLocaleTimeString('ar-EG')}
+              </span>
+            )}
+            <span className="bg-white/15 text-white text-xs font-bold px-3 py-1.5 rounded-lg border border-white/20">
+              {dispatchBannerOpen ? 'إخفاء ▴' : 'عرض ▾'}
+            </span>
+          </div>
         </button>
-        {dispatchQueueOpen && (
-          <div className="px-4 pb-4 pt-2 border-t border-indigo-100">
-            {dispatchQueueList.length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-4">الطابور فارغ حالياً — لا يوجد مناديبون في دور التوزيع.</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {dispatchQueueList.map((d: any) => (
-                  <div
-                    key={d.driver?.id ?? d.queue_rank}
-                    className="flex items-center gap-3 bg-white border border-indigo-100 rounded-lg px-3 py-2 shadow-sm"
-                  >
-                    <span className="flex-shrink-0 w-7 h-7 bg-indigo-600 text-white text-xs font-black rounded-full flex items-center justify-center">
-                      {d.queue_rank}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{d.driver?.full_name ?? `#${d.driver?.id}`}</p>
-                      <p className="text-xs text-gray-500 truncate" dir="ltr">{d.driver?.phone ?? ''}</p>
-                      {d.queue_reason && (
-                        <p className="text-[11px] text-indigo-500 truncate">{d.queue_reason}</p>
+
+        {/* Expanded queue list */}
+        {dispatchBannerOpen && (
+          <div style={{ background: 'linear-gradient(160deg,#1a0d35 0%,#120a24 60%,#0f0d20 100%)' }} className="px-4 py-4">
+            {!dispatchQueueData && (
+              <p className="text-sm text-violet-300/60 text-center py-6">جارٍ التحميل...</p>
+            )}
+            {dispatchQueueData?.queue?.length === 0 && (
+              <div className="text-center py-8 space-y-2">
+                <p className="text-3xl">😴</p>
+                <p className="text-violet-200 text-sm font-semibold">الطابور فارغ حالياً</p>
+                <p className="text-violet-400/60 text-xs">لا يوجد مندوب متاح لاستلام الطلبات التلقائية</p>
+              </div>
+            )}
+            {dispatchQueueData?.queue && dispatchQueueData.queue.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {dispatchQueueData.queue.map((item: any, idx: number) => {
+                  const isFirst = idx === 0;
+                  const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
+                  const initials = (item.driver?.full_name ?? '?').trim().charAt(0).toUpperCase();
+                  const reasonMap: Record<string, string> = {
+                    oldest_available_since: 'الأقدم إتاحةً',
+                    least_orders_today:     'الأقل طلبات اليوم',
+                    manual_priority:        'أولوية يدوية',
+                    round_robin:            'دور منتظم',
+                  };
+                  const reasonLabel = reasonMap[item.queue_reason] ?? item.queue_reason ?? '';
+                  return (
+                    <div
+                      key={item.driver?.id}
+                      className="relative flex items-center gap-3 rounded-xl p-3.5 transition-all"
+                      style={
+                        isFirst
+                          ? {
+                              background: 'linear-gradient(135deg,rgba(124,58,237,0.35) 0%,rgba(79,70,229,0.25) 100%)',
+                              border: '1px solid rgba(167,139,250,0.45)',
+                              boxShadow: '0 4px 24px rgba(124,58,237,0.25)',
+                            }
+                          : {
+                              background: 'rgba(255,255,255,0.04)',
+                              border: '1px solid rgba(255,255,255,0.09)',
+                            }
+                      }
+                    >
+                      {/* Top glow bar on #1 */}
+                      {isFirst && (
+                        <div
+                          className="absolute top-0 right-0 left-0 h-px rounded-t-xl"
+                          style={{ background: 'linear-gradient(to left,#a78bfa,#6366f1,#a78bfa)' }}
+                        />
+                      )}
+
+                      {/* Avatar with initials */}
+                      <div
+                        className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-base shadow-lg"
+                        style={
+                          isFirst
+                            ? { background: 'linear-gradient(135deg,#7c3aed,#4f46e5)' }
+                            : idx === 1
+                              ? { background: 'linear-gradient(135deg,#6b7280,#9ca3af)' }
+                              : idx === 2
+                                ? { background: 'linear-gradient(135deg,#92400e,#d97706)' }
+                                : { background: 'rgba(255,255,255,0.1)' }
+                        }
+                      >
+                        {initials}
+                      </div>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold truncate text-white flex items-center gap-1.5">
+                          {medal && <span className="text-base leading-none">{medal}</span>}
+                          {item.driver?.full_name}
+                        </p>
+                        {reasonLabel && (
+                          <p className="text-xs truncate mt-0.5" style={{ color: 'rgba(196,181,253,0.7)' }}>
+                            {reasonLabel}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Rank badge / Next pill */}
+                      {isFirst ? (
+                        <span
+                          className="flex-shrink-0 text-xs font-black px-3 py-1 rounded-full text-white shadow-md"
+                          style={{ background: 'linear-gradient(135deg,#7c3aed,#6366f1)' }}
+                        >
+                          التالي
+                        </span>
+                      ) : (
+                        <span
+                          className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                          style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(167,139,250,0.7)' }}
+                        >
+                          #{item.queue_rank}
+                        </span>
                       )}
                     </div>
-                    <span className={`flex-shrink-0 inline-block h-2 w-2 rounded-full ${d.driver?.is_available ? 'bg-emerald-500' : 'bg-gray-300'}`} />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         )}
       </div>
-
       {/* On-page narrow-down: search within today's orders by name / phone */}
       <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 space-y-2">
         <div className="relative">
@@ -663,38 +724,27 @@ export const AdminOrders = () => {
                 </button>
               )}
               <div className="flex items-center justify-between text-xs text-gray-500">
-                <div className="flex items-center gap-2">
-                  <span>المندوب: <span className="font-medium text-gray-700">{order.assigned_driver?.full_name ?? '—'}</span></span>
-                  {order.assigned_driver && (
-                    <button
-                      onClick={() => setShowDriverChat({ id: order.assigned_driver.id, name: order.assigned_driver.full_name })}
-                      title={`محادثة مع ${order.assigned_driver.full_name}`}
-                      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 font-bold hover:bg-cyan-200 active:bg-cyan-300 transition-colors border border-cyan-200"
-                    >
-                      💬 محادثة
-                    </button>
-                  )}
-                </div>
-                <span className="bg-gray-100 px-2 py-0.5 rounded-full">{order.delivery_eta_minutes} د</span>
+                <span>المندوب: {order.assigned_driver?.full_name ?? '—'}</span>
+                <span>{order.delivery_eta_minutes} د</span>
               </div>
-              <div className="flex flex-wrap gap-2 pt-1">
-                <button onClick={() => setShowDetails(order)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 font-semibold border border-gray-200 hover:bg-gray-200 transition-colors">تفاصيل</button>
-                <button onClick={() => setShowOffers(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium border border-blue-100 hover:bg-blue-100 transition-colors">العروض</button>
-                <button onClick={() => setShowAssignments(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-purple-50 text-purple-700 font-medium border border-purple-100 hover:bg-purple-100 transition-colors">السجل</button>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setShowDetails(order)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 font-semibold border border-gray-200">تفاصيل</button>
+                <button onClick={() => setShowOffers(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium">العروض</button>
+                <button onClick={() => setShowAssignments(order.id)} className="text-xs px-3 py-1.5 rounded-lg bg-purple-50 text-purple-700 font-medium">السجل</button>
                 {['pending', 'offered'].includes(order.status) && (
-                  <button onClick={() => { setShowAssign(order.id); setAssignDriverId(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium border border-indigo-100 hover:bg-indigo-100 transition-colors">تعيين مندوب</button>
+                  <button onClick={() => { setShowAssign(order.id); setAssignDriverId(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium">تعيين مندوب</button>
                 )}
                 {['assigned', 'in_progress'].includes(order.status) && (
-                  <button onClick={() => { setShowReassign(order); setReassignDriverId(''); setReassignAllowInProgress(false); }} className="text-xs px-3 py-1.5 rounded-lg bg-orange-50 text-orange-700 font-medium border border-orange-100 hover:bg-orange-100 transition-colors">إعادة تعيين</button>
+                  <button onClick={() => { setShowReassign(order); setReassignDriverId(''); setReassignAllowInProgress(false); }} className="text-xs px-3 py-1.5 rounded-lg bg-orange-50 text-orange-700 font-medium">إعادة تعيين</button>
                 )}
                 {['assigned'].includes(order.status) && (
-                  <button onClick={() => { setShowUnassign(order); setUnassignReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-yellow-50 text-yellow-700 font-medium border border-yellow-100 hover:bg-yellow-100 transition-colors">إلغاء تعيين</button>
+                  <button onClick={() => { setShowUnassign(order); setUnassignReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-yellow-50 text-yellow-700 font-medium">إلغاء تعيين</button>
                 )}
                 {!['completed', 'cancelled', 'expired'].includes(order.status) && (
-                  <button onClick={() => { setShowEdit(order); setEditForm({ pickup_address: order.pickup_address, pickup_contact: order.pickup_contact ?? '', package_description: order.package_description ?? '', price: order.price, delivery_eta_minutes: String(order.delivery_eta_minutes) }); }} className="text-xs px-3 py-1.5 rounded-lg bg-teal-50 text-teal-700 font-medium border border-teal-100 hover:bg-teal-100 transition-colors">تعديل</button>
+                  <button onClick={() => { setShowEdit(order); setEditForm({ pickup_address: order.pickup_address, pickup_contact: order.pickup_contact ?? '', package_description: order.package_description ?? '', price: order.price, delivery_eta_minutes: String(order.delivery_eta_minutes) }); }} className="text-xs px-3 py-1.5 rounded-lg bg-teal-50 text-teal-700 font-medium">تعديل</button>
                 )}
                 {!['completed', 'cancelled', 'expired'].includes(order.status) && (
-                  <button onClick={() => { setShowCancel(order.id); setCancelReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 font-medium border border-red-100 hover:bg-red-100 transition-colors">إلغاء</button>
+                  <button onClick={() => { setShowCancel(order.id); setCancelReason(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 font-medium">إلغاء</button>
                 )}
               </div>
             </div>
@@ -746,48 +796,34 @@ export const AdminOrders = () => {
                     {order.pickup_address}
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={order.status} /></td>
-                  <td className="px-4 py-3">
-                    {order.assigned_driver ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm text-gray-700 font-medium truncate max-w-[100px]">{order.assigned_driver.full_name}</span>
-                        <button
-                          onClick={() => setShowDriverChat({ id: order.assigned_driver.id, name: order.assigned_driver.full_name })}
-                          title={`محادثة مع ${order.assigned_driver.full_name}`}
-                          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-cyan-100 hover:bg-cyan-200 text-sm transition-colors border border-cyan-200"
-                        >
-                          💬
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-400">—</span>
-                    )}
-                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{order.assigned_driver?.full_name ?? '—'}</td>
                   <td className="px-4 py-3 text-sm font-semibold text-gray-900">{order.price} ج.م</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{order.delivery_eta_minutes} د</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1 flex-wrap">
                       <button
                         onClick={() => setShowDetails(order)}
-                        className="text-xs px-2.5 py-1 rounded-md bg-gray-50 text-gray-700 hover:bg-gray-100 font-medium border border-gray-200 transition-colors whitespace-nowrap"
+                        className="text-xs px-2 py-1 rounded-md bg-gray-50 text-gray-700 hover:bg-gray-100 font-medium border border-gray-200"
+                        title="عرض كل تفاصيل الطلب"
                       >
                         تفاصيل
                       </button>
                       <button
                         onClick={() => setShowOffers(order.id)}
-                        className="text-xs px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium border border-blue-100 transition-colors whitespace-nowrap"
+                        className="text-xs px-2 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium"
                       >
                         العروض
                       </button>
                       <button
                         onClick={() => setShowAssignments(order.id)}
-                        className="text-xs px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 font-medium border border-purple-100 transition-colors whitespace-nowrap"
+                        className="text-xs px-2 py-1 rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 font-medium"
                       >
                         السجل
                       </button>
                       {['pending', 'offered'].includes(order.status) && (
                         <button
                           onClick={() => { setShowAssign(order.id); setAssignDriverId(''); }}
-                          className="text-xs px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium border border-indigo-100 transition-colors whitespace-nowrap"
+                          className="text-xs px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium"
                         >
                           تعيين
                         </button>
@@ -795,7 +831,7 @@ export const AdminOrders = () => {
                       {['assigned', 'in_progress'].includes(order.status) && (
                         <button
                           onClick={() => { setShowReassign(order); setReassignDriverId(''); setReassignAllowInProgress(false); }}
-                          className="text-xs px-2.5 py-1 rounded-md bg-orange-50 text-orange-700 hover:bg-orange-100 font-medium border border-orange-100 transition-colors whitespace-nowrap"
+                          className="text-xs px-2 py-1 rounded-md bg-orange-50 text-orange-700 hover:bg-orange-100 font-medium"
                         >
                           إعادة تعيين
                         </button>
@@ -803,7 +839,7 @@ export const AdminOrders = () => {
                       {['assigned'].includes(order.status) && (
                         <button
                           onClick={() => { setShowUnassign(order); setUnassignReason(''); }}
-                          className="text-xs px-2.5 py-1 rounded-md bg-yellow-50 text-yellow-700 hover:bg-yellow-100 font-medium border border-yellow-100 transition-colors whitespace-nowrap"
+                          className="text-xs px-2 py-1 rounded-md bg-yellow-50 text-yellow-700 hover:bg-yellow-100 font-medium"
                         >
                           إلغاء تعيين
                         </button>
@@ -811,7 +847,7 @@ export const AdminOrders = () => {
                       {!['completed', 'cancelled', 'expired'].includes(order.status) && (
                         <button
                           onClick={() => { setShowEdit(order); setEditForm({ pickup_address: order.pickup_address, pickup_contact: order.pickup_contact ?? '', package_description: order.package_description ?? '', price: order.price, delivery_eta_minutes: String(order.delivery_eta_minutes) }); }}
-                          className="text-xs px-2.5 py-1 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 font-medium border border-teal-100 transition-colors whitespace-nowrap"
+                          className="text-xs px-2 py-1 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 font-medium"
                         >
                           تعديل
                         </button>
@@ -819,7 +855,7 @@ export const AdminOrders = () => {
                       {!['completed', 'cancelled', 'expired'].includes(order.status) && (
                         <button
                           onClick={() => { setShowCancel(order.id); setCancelReason(''); }}
-                          className="text-xs px-2.5 py-1 rounded-md bg-red-50 text-red-700 hover:bg-red-100 font-medium border border-red-100 transition-colors whitespace-nowrap"
+                          className="text-xs px-2 py-1 rounded-md bg-red-50 text-red-700 hover:bg-red-100 font-medium"
                         >
                           إلغاء
                         </button>
@@ -1333,71 +1369,6 @@ export const AdminOrders = () => {
                 </div>
               </div>
             ))}
-          </div>
-        </Modal>
-      )}
-
-      {/* Driver Chat Modal */}
-      {showDriverChat && (
-        <Modal
-          title={`💬 محادثة مع ${showDriverChat.name}`}
-          onClose={() => { setShowDriverChat(null); setDriverChatMessage(''); }}
-        >
-          <div className="flex flex-col" style={{ height: '60vh' }}>
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50 rounded-xl mb-3 min-h-0">
-              {driverChatMsgs.length === 0 && (
-                <div className="text-center py-10">
-                  <p className="text-2xl mb-2">💬</p>
-                  <p className="text-gray-500 text-sm">لا توجد رسائل بعد.</p>
-                  <p className="text-gray-400 text-xs mt-1">ابدأ المحادثة مع المندوب.</p>
-                </div>
-              )}
-              {driverChatMsgs.map((msg: any) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.sender_type === 'admin' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm shadow-sm ${
-                      msg.sender_type === 'admin'
-                        ? 'bg-blue-600 text-white rounded-br-sm'
-                        : 'bg-white text-gray-800 border border-gray-100 rounded-bl-sm'
-                    }`}
-                  >
-                    {msg.sender_type !== 'admin' && (
-                      <p className="text-[10px] font-bold text-gray-400 mb-0.5">{showDriverChat.name}</p>
-                    )}
-                    <p>{msg.body}</p>
-                    <p className={`text-[10px] mt-0.5 ${msg.sender_type === 'admin' ? 'text-blue-200' : 'text-gray-400'}`}>
-                      {new Date(msg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              <div ref={chatBottomRef} />
-            </div>
-            {/* Input */}
-            <form
-              className="flex gap-2 flex-shrink-0"
-              onSubmit={e => { e.preventDefault(); if (driverChatMessage.trim() && driverChatThread) sendDriverChatMutation.mutate(); }}
-            >
-              <input
-                type="text"
-                value={driverChatMessage}
-                onChange={e => setDriverChatMessage(e.target.value)}
-                placeholder="اكتب رسالة للمندوب..."
-                className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                autoFocus
-              />
-              <button
-                type="submit"
-                disabled={!driverChatMessage.trim() || sendDriverChatMutation.isPending || !driverChatThread}
-                className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold px-5 py-2.5 rounded-xl transition-colors disabled:opacity-50"
-              >
-                {sendDriverChatMutation.isPending ? '...' : '↑'}
-              </button>
-            </form>
           </div>
         </Modal>
       )}

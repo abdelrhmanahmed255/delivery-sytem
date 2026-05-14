@@ -84,8 +84,19 @@ export const DriverProfile = () => {
     ? { label: 'قيد المراجعة', cls: 'bg-yellow-400 text-gray-900' }
     : { label: me?.approval_status ?? '', cls: 'bg-red-400 text-white' };
 
+  // Warn when available=true but no shift is open (admin must open a shift)
+  const availableButNoShift = me?.is_available && !isRestricted && !me?.current_shift_id;
+
   return (
     <div className="p-4 space-y-4 max-w-lg mx-auto">
+
+      {/* ── No active shift warning ── */}
+      {availableButNoShift && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
+          <p className="text-sm font-bold text-orange-800">⚠️ أنت متاح لكن لا توجد وردية مفتوحة</p>
+          <p className="text-xs text-orange-700 mt-1">لا يمكنك استلام طلبات حتى يفتح المسؤول وردية لك.</p>
+        </div>
+      )}
 
       {/* ── Availability — BIG prominent card ─────────────────── */}
       <button

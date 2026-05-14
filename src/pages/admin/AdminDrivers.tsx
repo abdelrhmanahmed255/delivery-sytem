@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { driversApi } from '../../api/drivers';
 import { StatusBadge } from '../../components/StatusBadge';
@@ -39,6 +40,8 @@ function parseEgyptianId(id: string) {
 
 export const AdminDrivers = () => {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [offset, setOffset] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [showDetails, setShowDetails] = useState<any>(null);
@@ -56,18 +59,52 @@ export const AdminDrivers = () => {
   const [restrictReason, setRestrictReason] = useState('');
   const [closePayout, setClosePayout] = useState('');
   const [closeNote, setCloseNote] = useState('');
+  const [searchName, setSearchName] = useState('');
+  const [searchPhone, setSearchPhone] = useState('');
   const LIMIT = 20;
+
+  // Auto-open chat when navigated here from the notification bell
+  useEffect(() => {
+    const s = location.state as any;
+    if (s?.chatDriver) {
+      setShowDriverChat(s.chatDriver);
+      setChatMessage('');
+      // Clear the state so refreshing the page doesn't re-open the modal
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate, location.pathname]);
 
   const [form, setForm] = useState({
     email: '', phone: '', full_name: '', legal_arabic_name: '',
     national_id_number: '', password: '', vehicle_type: '', vehicle_plate: '',
   });
 
+  // Build the active search term: phone takes priority (digits are unambiguous)
+  const activeSearch = searchPhone.trim() || searchName.trim() || undefined;
+
   const { data, isLoading, isFetching, dataUpdatedAt } = useQuery({
-    queryKey: ['drivers', offset],
-    queryFn: () => driversApi.list({ limit: LIMIT, offset }),
+    // When searching, fetch up to 200 rows without offset so we can filter client-side
+    // (the backend /admin/drivers does not support a search query param)
+    queryKey: ['drivers', activeSearch ? 'search-all' : offset],
+    queryFn: () => driversApi.list(activeSearch ? { limit: 200, offset: 0 } : { limit: LIMIT, offset }),
     refetchInterval: 30_000,
   });
+
+  // Client-side filtering
+  const filteredItems: any[] = activeSearch
+    ? (data?.items ?? []).filter((d: any) => {
+        const q = activeSearch.toLowerCase();
+        return (
+          d.full_name?.toLowerCase().includes(q) ||
+          d.legal_arabic_name?.toLowerCase().includes(q) ||
+          d.phone?.includes(activeSearch)
+        );
+      })
+    : (data?.items ?? []);
+
+  // Reset to first page whenever search changes
+  const handleSearchName = (v: string) => { setSearchName(v); setOffset(0); };
+  const handleSearchPhone = (v: string) => { setSearchPhone(v); setOffset(0); };
 
   const createMutation = useMutation({
     mutationFn: () => driversApi.create({ ...form, vehicle_type: form.vehicle_type || undefined, vehicle_plate: form.vehicle_plate || undefined }),
@@ -141,9 +178,9 @@ export const AdminDrivers = () => {
 
   const { data: chatMessagesData, refetch: refetchChat } = useQuery({
     queryKey: ['driver-chat-messages', showDriverChat?.id],
-    queryFn: () => driversApi.getDriverChatMessages(showDriverChat!.id),
-    enabled: !!chatThreadData,
-    refetchInterval: !!chatThreadData ? 8_000 : false,
+    queryFn: () => driversApi.getDriverChatMessages(showDriverChat.id),
+    enabled: !!showDriverChat,
+    refetchInterval: showDriverChat ? 8_000 : false,
   });
 
   const sendChatMutation = useMutation({
@@ -197,12 +234,60 @@ export const AdminDrivers = () => {
         </div>
       </div>
 
+      {/* Search bar */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="relative">
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none text-sm">🔍</span>
+            <input
+              type="text"
+              value={searchName}
+              onChange={e => handleSearchName(e.target.value)}
+              placeholder="ابحث بالاسم..."
+              className="w-full border border-gray-200 rounded-lg pr-9 pl-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+            {searchName && (
+              <button
+                type="button"
+                onClick={() => handleSearchName('')}
+                className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 text-xs font-bold px-1"
+              >✕</button>
+            )}
+          </div>
+          <div className="relative">
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none text-sm">📱</span>
+            <input
+              type="tel"
+              value={searchPhone}
+              onChange={e => handleSearchPhone(e.target.value)}
+              placeholder="ابحث برقم الهاتف..."
+              dir="ltr"
+              className="w-full border border-gray-200 rounded-lg pr-9 pl-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-right"
+            />
+            {searchPhone && (
+              <button
+                type="button"
+                onClick={() => handleSearchPhone('')}
+                className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 text-xs font-bold px-1"
+              >✕</button>
+            )}
+          </div>
+        </div>
+        {activeSearch && (
+          <p className="text-xs text-indigo-600 mt-2 px-1">
+            نتائج البحث عن: <span className="font-semibold">"{activeSearch}"</span>
+            {' — '}{isLoading ? '...' : filteredItems.length} نتيجة
+            <button onClick={() => { handleSearchName(''); handleSearchPhone(''); }} className="mr-2 text-red-500 hover:text-red-700 font-semibold">مسح البحث ✕</button>
+          </p>
+        )}
+      </div>
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         {/* Mobile Card View */}
         <div className="md:hidden divide-y divide-gray-100">
           {isLoading && <p className="px-4 py-8 text-center text-gray-400">جارٍ تحميل المناديبين...</p>}
-          {!isLoading && data?.items?.length === 0 && <p className="px-4 py-8 text-center text-gray-400">لا يوجد مناديبون.</p>}
-          {data?.items?.map((driver: any) => (
+          {!isLoading && filteredItems.length === 0 && <p className="px-4 py-8 text-center text-gray-400">{activeSearch ? 'لا توجد نتائج مطابقة.' : 'لا يوجد مناديبون.'}</p>}
+          {filteredItems.map((driver: any) => (
             <div key={driver.id} className="p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -263,10 +348,10 @@ export const AdminDrivers = () => {
               {isLoading && (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">جارٍ تحميل المناديبين...</td></tr>
               )}
-              {!isLoading && data?.items?.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">لا يوجد مناديبون.</td></tr>
+              {!isLoading && filteredItems.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">{activeSearch ? 'لا توجد نتائج مطابقة.' : 'لا يوجد مناديبون.'}</td></tr>
               )}
-              {data?.items?.map((driver: any) => (
+              {filteredItems.map((driver: any) => (
                 <tr key={driver.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3">
                     <div className="text-sm font-semibold text-gray-900">{driver.full_name}</div>
@@ -368,7 +453,7 @@ export const AdminDrivers = () => {
             </tbody>
           </table>
         </div>
-        {data && <div className="px-4 pb-4"><Pagination total={data.total} limit={LIMIT} offset={offset} onPageChange={setOffset} /></div>}
+        {data && !activeSearch && <div className="px-4 pb-4"><Pagination total={data.total} limit={LIMIT} offset={offset} onPageChange={setOffset} /></div>}
       </div>
 
       {/* Driver Details Modal */}
@@ -758,7 +843,7 @@ export const AdminDrivers = () => {
               />
               <button
                 type="submit"
-                disabled={!chatMessage.trim() || sendChatMutation.isPending || !chatThreadData}
+                disabled={!chatMessage.trim() || sendChatMutation.isPending}
                 className="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
               >
                 {sendChatMutation.isPending ? '...' : 'إرسال'}

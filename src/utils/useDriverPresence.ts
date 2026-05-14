@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { driversApi } from '../api/drivers';
-import { useAuthStore } from '../store/authStore';
+// This hook has been removed (May 2026).
+// Presence heartbeats and auto-presence are no longer used.
+// Driver availability is toggled manually via POST /drivers/me/availability only.
+// See DriverProfile.tsx for the availability toggle implementation.
+export {};
 
 /** Send a heartbeat every 30 seconds (safely above any reasonable backend minimum). */
 const HEARTBEAT_INTERVAL_MS = 30_000;

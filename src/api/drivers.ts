@@ -1,7 +1,7 @@
 import { apiClient } from './client';
 
 export const driversApi = {
-  list: (params?: { limit?: number; offset?: number }) =>
+  list: (params?: { limit?: number; offset?: number; search?: string }) =>
     apiClient.get('/admin/drivers', { params }).then(r => r.data),
 
   get: (driverId: number) =>
@@ -43,15 +43,6 @@ export const driversApi = {
 
   setAvailability: (is_available: boolean) =>
     apiClient.post('/drivers/me/availability', { is_available }).then(r => r.data),
-
-  presenceOpen: () =>
-    apiClient.post('/drivers/me/presence/open').then(r => r.data),
-
-  presenceHeartbeat: (is_interacting: boolean) =>
-    apiClient.post('/drivers/me/presence/heartbeat', { is_interacting }).then(r => r.data),
-
-  presenceClose: () =>
-    apiClient.post('/drivers/me/presence/close').then(r => r.data),
 
   // Shift management (admin only)
   openShift: (driverId: number) =>

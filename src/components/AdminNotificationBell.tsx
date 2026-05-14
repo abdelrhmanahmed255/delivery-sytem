@@ -1,63 +1,78 @@
 import { useState, useRef, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { adminNotificationsApi, type ChatThread } from '../api/adminNotifications';
+import { adminNotificationsApi, type ChatSummaryThread } from '../api/adminNotifications';
+
+const CURSOR_KEY = 'admin_chat_poll_cursor';
 
 export const AdminNotificationBell = () => {
   const [open, setOpen] = useState(false);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data: threads = [] } = useQuery<ChatThread[]>({
-    queryKey: ['admin-chat-threads'],
-    queryFn: adminNotificationsApi.getChatThreads,
+  // Persistent poll cursor — advances after each successful poll
+  const lastMsgIdRef = useRef<number>(0);
+  useEffect(() => {
+    try {
+      const stored = parseInt(localStorage.getItem(CURSOR_KEY) ?? '0', 10);
+      if (stored > 0) lastMsgIdRef.current = stored;
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Summary: badge count + thread inbox (refetch every 30 s) ────────────
+  const { data: summary } = useQuery({
+    queryKey: ['admin-chat-summary'],
+    queryFn: () => adminNotificationsApi.getSummary({ limit: 50 }),
     refetchInterval: 30_000,
     retry: false,
   });
 
-  const markRead = useMutation({
-    mutationFn: adminNotificationsApi.markThreadRead,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-chat-threads'] });
-    },
+  // ── Poll: incremental new-message detection (every 15 s) ────────────────
+  const { data: pollData } = useQuery({
+    queryKey: ['admin-chat-poll'],
+    queryFn: () => adminNotificationsApi.poll(lastMsgIdRef.current),
+    refetchInterval: 15_000,
+    retry: false,
   });
 
-  // Only show threads that have an unread message from a driver
-  const unreadThreads = threads.filter(
-    (t) => t.unread_count > 0 && t.last_sender_type === 'driver',
-  );
-  const totalUnread = unreadThreads.reduce((s, t) => s + t.unread_count, 0);
+  // Advance cursor and trigger summary refresh when new messages arrive
+  useEffect(() => {
+    if (!pollData?.messages?.length) return;
+    const maxId = Math.max(...pollData.messages.map(m => m.id));
+    if (maxId > lastMsgIdRef.current) {
+      lastMsgIdRef.current = maxId;
+      try { localStorage.setItem(CURSOR_KEY, String(maxId)); } catch { /* ignore */ }
+      queryClient.invalidateQueries({ queryKey: ['admin-chat-summary'] });
+      setHasNewMessages(true);
+    }
+  }, [pollData, queryClient]);
 
-  // All threads sorted: unread first
-  const sorted = [...threads].sort((a, b) => {
-    if (b.unread_count !== a.unread_count) return b.unread_count - a.unread_count;
-    if (!a.last_message_at) return 1;
-    if (!b.last_message_at) return -1;
-    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
-  });
+  const pendingCount = summary?.pending_thread_count ?? 0;
+  const threads: ChatSummaryThread[] = summary?.threads ?? [];
 
   // Close dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const handleThreadClick = (thread: ChatThread) => {
-    if (thread.unread_count > 0) {
-      markRead.mutate(thread.driver_id);
-    }
-    setOpen(false);
-    navigate('/admin/drivers');
+  const handleOpen = () => {
+    setOpen(v => !v);
+    setHasNewMessages(false);
   };
 
-  const handleMarkAllRead = () => {
-    unreadThreads.forEach((t) => markRead.mutate(t.driver_id));
+  const handleThreadClick = (thread: ChatSummaryThread) => {
+    setOpen(false);
+    // Navigate to drivers page and pass the target driver so the chat modal
+    // opens automatically without requiring the admin to find the row manually.
+    navigate('/admin/drivers', {
+      state: { chatDriver: { id: thread.driver_id, full_name: thread.driver_name } },
+    });
   };
 
   return (
@@ -65,13 +80,15 @@ export const AdminNotificationBell = () => {
       {/* Bell button */}
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label="الإشعارات"
-        className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400"
+        onClick={handleOpen}
+        aria-label="إشعارات المحادثات"
+        className={`relative p-2 rounded-lg hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
+          hasNewMessages ? 'animate-pulse' : ''
+        }`}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
-          className="w-6 h-6 text-gray-600"
+          className={`w-6 h-6 ${pendingCount > 0 ? 'text-emerald-600' : 'text-gray-600'}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -84,11 +101,16 @@ export const AdminNotificationBell = () => {
           />
         </svg>
 
-        {/* Unread badge */}
-        {totalUnread > 0 && (
+        {/* Pending count badge */}
+        {pendingCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 pointer-events-none">
-            {totalUnread > 99 ? '99+' : totalUnread}
+            {pendingCount > 99 ? '99+' : pendingCount}
           </span>
+        )}
+
+        {/* Blue dot for new-since-last-open */}
+        {hasNewMessages && pendingCount === 0 && (
+          <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white pointer-events-none" />
         )}
       </button>
 
@@ -100,109 +122,73 @@ export const AdminNotificationBell = () => {
         >
           {/* Header */}
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="font-bold text-gray-800 text-sm">الإشعارات</h3>
-            <div className="flex items-center gap-3">
-              {totalUnread > 0 && (
-                <button
-                  type="button"
-                  onClick={handleMarkAllRead}
-                  className="text-xs text-emerald-600 hover:text-emerald-700 font-medium"
-                >
-                  تحديد الكل كمقروء
-                </button>
-              )}
-              <span className="text-xs text-gray-400">
-                {totalUnread > 0 ? `${totalUnread} غير مقروء` : 'لا يوجد جديد'}
-              </span>
-            </div>
+            <h3 className="font-bold text-gray-800 text-sm">رسائل المناديبين</h3>
+            <span className="text-xs text-gray-400">
+              {pendingCount > 0
+                ? `${pendingCount} ${pendingCount === 1 ? 'رسالة تنتظر' : 'رسائل تنتظر'} ردك`
+                : 'لا توجد رسائل جديدة'}
+            </span>
           </div>
 
           {/* Thread list */}
           <div className="max-h-[360px] overflow-y-auto divide-y divide-gray-50">
-            {sorted.length === 0 ? (
+            {threads.length === 0 ? (
               <div className="px-4 py-10 text-center">
-                <p className="text-3xl mb-2">🔔</p>
-                <p className="text-gray-400 text-sm">لا توجد إشعارات بعد</p>
+                <p className="text-3xl mb-2">💬</p>
+                <p className="text-gray-400 text-sm">لا توجد رسائل معلقة</p>
+                <p className="text-gray-300 text-xs mt-1">ستظهر هنا رسائل المناديبين التي تنتظر ردك</p>
               </div>
             ) : (
-              sorted.map((thread) => {
-                const isUnread =
-                  thread.unread_count > 0 && thread.last_sender_type === 'driver';
-                return (
-                  <button
-                    key={thread.driver_id}
-                    type="button"
-                    onClick={() => handleThreadClick(thread)}
-                    className={`w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-right ${
-                      isUnread ? 'bg-emerald-50' : ''
-                    }`}
-                  >
-                    {/* Avatar */}
-                    <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 text-base">
-                      🚚
+              threads.map((thread) => (
+                <button
+                  key={thread.thread_id}
+                  type="button"
+                  onClick={() => handleThreadClick(thread)}
+                  className="w-full flex items-start gap-3 px-4 py-3 hover:bg-emerald-50 transition-colors text-right bg-emerald-50/40"
+                >
+                  {/* Avatar */}
+                  <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 text-base">
+                    🚚
+                  </div>
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-sm font-bold text-gray-900 truncate">
+                        {thread.driver_name}
+                      </span>
+                      <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
                     </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <span
-                          className={`text-sm truncate ${
-                            isUnread
-                              ? 'font-bold text-gray-900'
-                              : 'font-medium text-gray-700'
-                          }`}
-                        >
-                          {thread.driver_name}
-                        </span>
-                        {thread.unread_count > 0 && (
-                          <span className="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-0.5 flex-shrink-0">
-                            {thread.unread_count}
-                          </span>
-                        )}
-                      </div>
-
-                      {thread.last_message && (
-                        <p
-                          className={`text-xs truncate mt-0.5 ${
-                            isUnread ? 'text-gray-700 font-medium' : 'text-gray-400'
-                          }`}
-                        >
-                          {thread.last_sender_type === 'driver' ? '📩 ' : '↩️ '}
-                          {thread.last_message}
-                        </p>
-                      )}
-
-                      {thread.last_message_at && (
-                        <p className="text-[10px] text-gray-400 mt-0.5">
-                          {new Date(thread.last_message_at).toLocaleString('ar-EG', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            day: 'numeric',
-                            month: 'short',
-                          })}
-                        </p>
-                      )}
-                    </div>
-                  </button>
-                );
-              })
+                    <p className="text-xs text-gray-600 font-medium truncate mt-0.5">
+                      📩 {thread.last_message_preview}
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {new Date(thread.last_message_at).toLocaleString('ar-EG', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        day: 'numeric',
+                        month: 'short',
+                      })}
+                    </p>
+                  </div>
+                </button>
+              ))
             )}
           </div>
 
           {/* Footer */}
-          {sorted.length > 0 && (
-            <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50">
-              <button
-                type="button"
-                onClick={() => { setOpen(false); navigate('/admin/drivers'); }}
-                className="text-xs text-emerald-600 hover:text-emerald-700 font-medium w-full text-center"
-              >
-                فتح جميع المحادثات في صفحة المناديب ←
-              </button>
-            </div>
-          )}
+          <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); navigate('/admin/drivers'); }}
+              className="text-xs text-emerald-600 hover:text-emerald-700 font-medium w-full text-center"
+            >
+              فتح جميع المحادثات في صفحة المناديب ←
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
 };
+
+
