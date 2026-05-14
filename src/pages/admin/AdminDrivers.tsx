@@ -170,7 +170,7 @@ export const AdminDrivers = () => {
     refetchInterval: showIdleDrivers ? 30_000 : false,
   });
 
-  const { data: chatThreadData } = useQuery({
+  useQuery({
     queryKey: ['driver-chat-thread', showDriverChat?.id],
     queryFn: () => driversApi.openDriverChat(showDriverChat.id),
     enabled: !!showDriverChat,
