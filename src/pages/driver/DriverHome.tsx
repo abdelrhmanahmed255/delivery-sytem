@@ -27,6 +27,12 @@ export const DriverHome = () => {
   const queryClient = useQueryClient();
   const [openedOffer, setOpenedOffer] = useState<any>(null);
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => getNotificationPermission());
+  // Tracks availability locally so that backend-side automatic changes (e.g.
+  // the server marking the driver unavailable after order assignment) do NOT
+  // silently flip the toggle. Only a manual press updates this value.
+  const [localAvailable, setLocalAvailable] = useState<boolean | null>(null);
+  // Error shown when the driver tries to go available but has no open shift.
+  const [noShiftError, setNoShiftError] = useState(false);
   // Web Audio context for the in-page alarm beep. Lazily created on first
   // offer so we don't ask for an AudioContext until we actually need one
   // (browsers warn / log when an AC sits idle).
@@ -37,6 +43,14 @@ export const DriverHome = () => {
     queryFn: () => driversApi.me(),
     refetchInterval: 30000,
   });
+
+  // Initialise local availability from the server exactly once (first load).
+  // After that, only manual toggle updates it — server polling is ignored.
+  useEffect(() => {
+    if (me?.is_available !== undefined && localAvailable === null) {
+      setLocalAvailable(me.is_available);
+    }
+  }, [me?.is_available, localAvailable]);
 
   const { data: offerSummary } = useQuery({
     queryKey: ['currentOffer'],
@@ -136,7 +150,25 @@ export const DriverHome = () => {
 
   const availabilityMutation = useMutation({
     mutationFn: (val: boolean) => driversApi.setAvailability(val),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['driverMe'] }),
+    onMutate: (val: boolean) => {
+      // Optimistically update local state immediately on press.
+      setLocalAvailable(val);
+      setNoShiftError(false);
+    },
+    onError: (err: any, val: boolean) => {
+      // Revert local state if the server rejected the change.
+      setLocalAvailable(!val);
+      queryClient.invalidateQueries({ queryKey: ['driverMe'] });
+      // 400 business_rule_violation → driver has no admin-opened shift.
+      const code = err?.response?.data?.error?.code ?? err?.response?.data?.code;
+      if (err?.response?.status === 400 && code === 'business_rule_violation') {
+        setNoShiftError(true);
+      }
+    },
+    onSuccess: () => {
+      setNoShiftError(false);
+      queryClient.invalidateQueries({ queryKey: ['driverMe'] });
+    },
   });
 
   const openOfferMutation = useMutation({
@@ -161,7 +193,9 @@ export const DriverHome = () => {
     },
   });
 
-  const isAvailable = me?.is_available;
+  // Use driver-controlled local state; fall back to server value only before
+  // the first load so the toggle is never flipped by background polling.
+  const isAvailable = localAvailable ?? me?.is_available;
   const isRestricted = me?.restricted_until && new Date(me.restricted_until) > new Date();
 
   const offerOrder = openedOffer?.order ?? openedOffer;
@@ -213,10 +247,33 @@ export const DriverHome = () => {
         </div>
       )}
 
+      {/* ── No open shift error ────────────────────────── */}
+      {noShiftError && (
+        <div
+          role="alert"
+          className="bg-red-50 border-2 border-red-300 rounded-2xl p-4 flex items-start gap-3"
+        >
+          <span className="text-3xl flex-shrink-0" aria-hidden="true">🔒</span>
+          <div className="flex-1 min-w-0">
+            <p className="font-black text-base text-red-800">لا توجد وردية مفتوحة</p>
+            <p className="text-sm text-red-700 mt-1">
+              لا يمكنك تفعيل التوفر الآن. يجب على المسؤول فتح وردية لك أولاً.
+            </p>
+          </div>
+          <button
+            onClick={() => setNoShiftError(false)}
+            aria-label="إغلاق"
+            className="text-red-400 text-xl leading-none active:opacity-60 flex-shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* ── Availability toggle ─────────────────────────── */}
       <button
         onClick={() => !isRestricted && availabilityMutation.mutate(!isAvailable)}
-        disabled={availabilityMutation.isPending || !!isRestricted}
+        disabled={availabilityMutation.isPending || !!isRestricted || localAvailable === null}
         className={`w-full rounded-2xl p-5 text-white text-right transition-all active:scale-[0.98] shadow-md ${
           isRestricted ? 'bg-red-600' : isAvailable ? 'bg-green-500' : 'bg-gray-600'
         }`}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { driversApi } from '../../api/drivers';
 
@@ -10,6 +10,9 @@ export const DriverProfile = () => {
   const [pwForm, setPwForm] = useState({ current_password: '', new_password: '' });
   const [editForm, setEditForm] = useState<any>({});
   const [availCooldownUntil, setAvailCooldownUntil] = useState<string | null>(null);
+  // Tracks availability locally — backend polling never overwrites it.
+  // Only the manual toggle button updates this value.
+  const [localAvailable, setLocalAvailable] = useState<boolean | null>(null);
 
   const { data: me, isLoading } = useQuery({
     queryKey: ['driverMe'],
@@ -49,19 +52,38 @@ export const DriverProfile = () => {
 
   const availabilityMutation = useMutation({
     mutationFn: (val: boolean) => driversApi.setAvailability(val),
+    onMutate: (val: boolean) => {
+      // Optimistic: flip local state instantly on press.
+      setLocalAvailable(val);
+    },
     onSuccess: () => {
       setAvailCooldownUntil(null);
       queryClient.invalidateQueries({ queryKey: ['driverMe'] });
     },
-    onError: (err: any) => {
+    onError: (err: any, val: boolean) => {
+      // Revert optimistic update on any error.
+      setLocalAvailable(!val);
       if (err?.response?.status === 409) {
         const lockedUntil = err.response?.data?.detail?.availability_locked_until
           ?? err.response?.data?.availability_locked_until
           ?? null;
         setAvailCooldownUntil(lockedUntil);
       }
+      const code = err?.response?.data?.error?.code ?? err?.response?.data?.code;
+      if (err?.response?.status === 400 && code === 'business_rule_violation') {
+        setMsg({ text: '🔒 لا توجد وردية مفتوحة — يجب على المسؤول فتح وردية لك أولاً قبل تفعيل التوفر.', ok: false });
+      }
     },
   });
+
+  // Initialise from server exactly once (on first data load).
+  // After that, localAvailable is the source of truth for the toggle.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (me?.is_available !== undefined && localAvailable === null) {
+      setLocalAvailable(me.is_available);
+    }
+  }, [me?.is_available, localAvailable]);
 
   if (isLoading) {
     return (
@@ -84,8 +106,11 @@ export const DriverProfile = () => {
     ? { label: 'قيد المراجعة', cls: 'bg-yellow-400 text-gray-900' }
     : { label: me?.approval_status ?? '', cls: 'bg-red-400 text-white' };
 
+  // Driver-controlled display value — never flipped by background polling.
+  const isAvailable = localAvailable ?? me?.is_available;
+
   // Warn when available=true but no shift is open (admin must open a shift)
-  const availableButNoShift = me?.is_available && !isRestricted && !me?.current_shift_id;
+  const availableButNoShift = isAvailable && !isRestricted && !me?.current_shift_id;
 
   return (
     <div className="p-4 space-y-4 max-w-lg mx-auto">
@@ -100,10 +125,10 @@ export const DriverProfile = () => {
 
       {/* ── Availability — BIG prominent card ─────────────────── */}
       <button
-        onClick={() => !isRestricted && !isAvailLocked && availabilityMutation.mutate(!me?.is_available)}
-        disabled={availabilityMutation.isPending || !!isRestricted || !!isAvailLocked}
+        onClick={() => !isRestricted && !isAvailLocked && availabilityMutation.mutate(!isAvailable)}
+        disabled={availabilityMutation.isPending || !!isRestricted || !!isAvailLocked || localAvailable === null}
         className={`w-full rounded-2xl p-5 text-white text-right shadow-md transition-all active:scale-[0.98] disabled:opacity-70 ${
-          isRestricted ? 'bg-red-600' : isAvailLocked ? 'bg-amber-600' : me?.is_available ? 'bg-green-500' : 'bg-gray-700'
+          isRestricted ? 'bg-red-600' : isAvailLocked ? 'bg-amber-600' : isAvailable ? 'bg-green-500' : 'bg-gray-700'
         }`}
       >
         <div className="flex items-center justify-between gap-3">
@@ -112,14 +137,14 @@ export const DriverProfile = () => {
               {isRestricted ? 'حسابك موقوف' : isAvailLocked ? 'التغيير مقفل مؤقتاً' : 'حالتك — اضغط للتبديل'}
             </p>
             <p className="text-3xl font-black">
-              {isRestricted ? '⛔ موقوف' : isAvailLocked ? '🔒 مقفل' : me?.is_available ? '🟢 متاح' : '⚫ غير متاح'}
+              {isRestricted ? '⛔ موقوف' : isAvailLocked ? '🔒 مقفل' : isAvailable ? '🟢 متاح' : '⚫ غير متاح'}
             </p>
             <p className="text-sm opacity-70 mt-1">
               {isRestricted
                 ? `حتى ${new Date(me!.restricted_until).toLocaleString('ar-EG')}`
                 : isAvailLocked
                 ? `لا يمكنك التغيير حتى ${lockedUntilDate!.toLocaleString('ar-EG')}`
-                : me?.is_available
+                : isAvailable
                 ? 'تستقبل الطلبات الآن'
                 : 'اضغط لتفعيل التوفر'}
             </p>
@@ -129,8 +154,8 @@ export const DriverProfile = () => {
           </div>
           {/* Toggle indicator */}
           {!isRestricted && !isAvailLocked && (
-            <div className={`flex-shrink-0 relative h-10 w-20 rounded-full border-2 border-white/40 ${me?.is_available ? 'bg-green-400' : 'bg-gray-500'}`}>
-              <span className={`absolute top-1 h-8 w-8 rounded-full bg-white shadow-lg transition-all duration-300 ${me?.is_available ? 'left-10' : 'left-1'}`} />
+            <div className={`flex-shrink-0 relative h-10 w-20 rounded-full border-2 border-white/40 ${isAvailable ? 'bg-green-400' : 'bg-gray-500'}`}>
+              <span className={`absolute top-1 h-8 w-8 rounded-full bg-white shadow-lg transition-all duration-300 ${isAvailable ? 'left-10' : 'left-1'}`} />
             </div>
           )}
         </div>

@@ -1,6 +1,8 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/authStore';
 import { useTextScale } from '../utils/textScale';
+import { driverOrdersApi } from '../api/driverOrders';
 
 const NAV_TABS = [
   { label: 'العروض', path: '/driver/home', icon: '🔔' },
@@ -14,6 +16,15 @@ export const DriverLayout = () => {
   const logout = useAuthStore(state => state.logout);
   const location = useLocation();
   const { scale, cycle, label } = useTextScale();
+
+  // Poll active orders so the bottom-bar badge stays up to date regardless
+  // of which driver page is currently open.
+  const { data: activeOrders } = useQuery({
+    queryKey: ['activeOrders'],
+    queryFn: () => driverOrdersApi.activeOrders(),
+    refetchInterval: 15000,
+  });
+  const activeCount = activeOrders?.length ?? 0;
 
   // Availability is toggled manually by the driver only — no automatic presence
   // calls or heartbeats happen here.
@@ -78,7 +89,14 @@ export const DriverLayout = () => {
                 {isActive && (
                   <span className="absolute top-0 inset-x-3 h-0.5 bg-blue-600 rounded-b-full" />
                 )}
-                <span className="text-2xl leading-none">{tab.icon}</span>
+                <span className="relative inline-flex">
+                  <span className="text-2xl leading-none">{tab.icon}</span>
+                  {tab.path === '/driver/active' && activeCount > 0 && (
+                    <span className="absolute -top-1 -right-1.5 bg-red-500 text-white font-black leading-none min-w-[17px] h-[17px] rounded-full flex items-center justify-center text-[10px] px-[3px]">
+                      {activeCount > 9 ? '9+' : activeCount}
+                    </span>
+                  )}
+                </span>
                 <span className={`text-xs font-bold ${isActive ? 'text-blue-600' : 'text-gray-400'}`}>
                   {tab.label}
                 </span>
