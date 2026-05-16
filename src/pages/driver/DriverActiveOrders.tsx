@@ -16,7 +16,18 @@ const OrderCard = ({
   isPickingUp: boolean;
   isCompleting: boolean;
 }) => {
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState<number | null>(() => {
+    // Initialize with calculated time on first render
+    if (order.status === 'in_progress' && order.picked_up_at) {
+      const pickupTime = new Date(order.picked_up_at).getTime();
+      const totalSecs = order.deadline_at 
+        ? Math.floor((new Date(order.deadline_at).getTime() - pickupTime) / 1000)
+        : (order.delivery_eta_minutes ?? 30) * 60;
+      const elapsed = Math.floor((Date.now() - pickupTime) / 1000);
+      return Math.max(0, totalSecs - elapsed);
+    }
+    return null;
+  });
   const autoPickedUpRef = useRef(false);
   const autoCompletedRef = useRef(false);
   const onPickupRef = useRef(onPickup);
@@ -24,7 +35,17 @@ const OrderCard = ({
   useEffect(() => { onPickupRef.current = onPickup; });
   useEffect(() => { onCompleteRef.current = onComplete; });
 
-  const totalSecs = (order.delivery_eta_minutes ?? 30) * 60;
+  // Calculate total seconds from deadline or delivery_eta_minutes
+  const getTotalSecs = () => {
+    if (order.deadline_at && order.picked_up_at) {
+      const pickupTime = new Date(order.picked_up_at).getTime();
+      const deadlineTime = new Date(order.deadline_at).getTime();
+      return Math.max(0, Math.floor((deadlineTime - pickupTime) / 1000));
+    }
+    return (order.delivery_eta_minutes ?? 30) * 60;
+  };
+
+  const totalSecs = getTotalSecs();
 
   useEffect(() => {
     if (order.status === 'assigned' && !autoPickedUpRef.current) {
@@ -34,30 +55,48 @@ const OrderCard = ({
   }, [order.status, order.id]);
 
   useEffect(() => {
+    // Only run timer if status is in_progress
     if (order.status !== 'in_progress') {
       setTimeLeft(null);
       autoCompletedRef.current = false;
       return;
     }
-    const key = `pickup_ts_${order.id}`;
-    if (!localStorage.getItem(key)) {
-      localStorage.setItem(key, Date.now().toString());
+
+    // Check if we have the required timestamp
+    if (!order.picked_up_at) {
+      setTimeLeft(null);
+      return;
     }
-    const pickupTs = Number(localStorage.getItem(key));
+
+    let pickupTs: number;
+    try {
+      pickupTs = new Date(order.picked_up_at).getTime();
+      if (isNaN(pickupTs)) {
+        console.error('Invalid picked_up_at timestamp:', order.picked_up_at);
+        setTimeLeft(null);
+        return;
+      }
+    } catch (e) {
+      console.error('Error parsing picked_up_at:', e);
+      setTimeLeft(null);
+      return;
+    }
+
     const tick = () => {
       const elapsed = Math.floor((Date.now() - pickupTs) / 1000);
       const remaining = Math.max(0, totalSecs - elapsed);
       setTimeLeft(remaining);
+      
       if (remaining === 0 && !autoCompletedRef.current) {
         autoCompletedRef.current = true;
-        localStorage.removeItem(key);
         onCompleteRef.current(order.id);
       }
     };
+
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [order.status, order.id, totalSecs]);
+  }, [order.status, order.id, totalSecs, order.picked_up_at]);
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -102,7 +141,7 @@ const OrderCard = ({
             <p className={`text-7xl font-black tabular-nums tracking-wider ${timerColor}`}>
               {formatTime(timeLeft)}
             </p>
-            <p className="text-sm text-gray-500 mt-1">من أصل {order.delivery_eta_minutes} دقيقة</p>
+            <p className="text-sm text-gray-500 mt-1">من أصل {Math.ceil(totalSecs / 60)} دقيقة</p>
             {timeLeft === 0 && (
               <p className="text-base text-red-600 font-black mt-2">
                 ⚠️ انتهى الوقت — جارٍ إنهاء الطلب تلقائياً
@@ -195,7 +234,6 @@ const OrderCard = ({
         <div className="px-4 pb-4">
           <button
             onClick={() => {
-              localStorage.removeItem(`pickup_ts_${order.id}`);
               onComplete(order.id);
             }}
             disabled={isCompleting}
@@ -221,8 +259,7 @@ export const DriverActiveOrders = () => {
 
   const pickupMutation = useMutation({
     mutationFn: (orderId: number) => driverOrdersApi.pickup(orderId),
-    onSuccess: (_, orderId) => {
-      localStorage.setItem(`pickup_ts_${orderId}`, Date.now().toString());
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['activeOrders'] });
     },
   });
