@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '../../api/orders';
@@ -44,6 +44,7 @@ export const AdminOrders = () => {
   const [showOffers, setShowOffers] = useState<number | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [showDetails, setShowDetails] = useState<any | null>(null);
+  const [showChat, setShowChat] = useState<any | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [assignDriverId, setAssignDriverId] = useState('');
   const [reassignDriverId, setReassignDriverId] = useState('');
@@ -695,7 +696,7 @@ export const AdminOrders = () => {
           {visibleOrders.map((order: any) => (
             <div key={order.id} className="p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="flex-1">
                   <p className="font-semibold text-gray-900">{order.customer.full_name}</p>
                   <p className="text-xs text-gray-400">{order.customer.phone}</p>
                   <p className="text-xs font-mono text-gray-300">{order.code}</p>
@@ -724,7 +725,19 @@ export const AdminOrders = () => {
                 </button>
               )}
               <div className="flex items-center justify-between text-xs text-gray-500">
-                <span>المندوب: {order.assigned_driver?.full_name ?? '—'}</span>
+                <span className="flex items-center gap-2">
+                  <span>المندوب: {order.assigned_driver?.full_name ?? '—'}</span>
+                  {order.assigned_driver && (
+                    <button
+                      type="button"
+                      onClick={() => setShowChat(order)}
+                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors flex-shrink-0 text-sm"
+                      title="فتح المحادثة مع المندوب"
+                    >
+                      💬
+                    </button>
+                  )}
+                </span>
                 <span>{order.delivery_eta_minutes} د</span>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -796,7 +809,21 @@ export const AdminOrders = () => {
                     {order.pickup_address}
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={order.status} /></td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{order.assigned_driver?.full_name ?? '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    <div className="flex items-center gap-2">
+                      <span>{order.assigned_driver?.full_name ?? '—'}</span>
+                      {order.assigned_driver && (
+                        <button
+                          type="button"
+                          onClick={() => setShowChat(order)}
+                          className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors flex-shrink-0 text-sm"
+                          title="فتح المحادثة مع المندوب"
+                        >
+                          💬
+                        </button>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-sm font-semibold text-gray-900">{order.price} ج.م</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{order.delivery_eta_minutes} د</td>
                   <td className="px-4 py-3">
@@ -1372,6 +1399,144 @@ export const AdminOrders = () => {
           </div>
         </Modal>
       )}
+
+      {/* Chat Modal */}
+      {showChat !== null && (
+        <ChatModal order={showChat} onClose={() => setShowChat(null)} />
+      )}
     </div>
+  );
+};
+
+// Chat Modal Component
+const ChatModal = ({ order, onClose }: { order: any; onClose: () => void }) => {
+  const [message, setMessage] = useState('');
+  const [messages, setMessages] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { data: chatMessages, refetch, isFetching } = useQuery({
+    queryKey: ['order-chat-messages', order.id, order.assigned_driver?.id],
+    queryFn: async () => {
+      if (!order.assigned_driver?.id) return [];
+      const msgs = await driversApi.getDriverChatMessages(order.assigned_driver.id, { limit: 50 });
+      return msgs ?? [];
+    },
+    enabled: !!order.assigned_driver?.id,
+  });
+
+  const sendMutation = useMutation({
+    mutationFn: async () => {
+      if (!order.assigned_driver?.id) throw new Error('No driver');
+      return driversApi.sendDriverChatMessage(order.assigned_driver.id, message);
+    },
+    onSuccess: () => {
+      setMessage('');
+      refetch();
+    },
+  });
+
+  // Update messages state
+  useEffect(() => {
+    if (chatMessages) {
+      setMessages(chatMessages);
+      setIsLoading(false);
+    }
+  }, [chatMessages]);
+
+  // Scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  if (!order.assigned_driver) {
+    return (
+      <Modal title="المحادثة" onClose={onClose}>
+        <p className="text-sm text-gray-600 text-center py-8">لا يوجد مندوب معين لهذا الطلب.</p>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title={`💬 محادثة — ${order.customer.full_name}`} onClose={onClose}>
+      <div className="flex flex-col h-[500px]">
+        {/* Header */}
+        <div className="px-0 py-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">{order.assigned_driver.full_name}</p>
+            <p className="text-xs text-gray-500">المندوب المعين</p>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+          {isLoading && (
+            <p className="text-center text-gray-400 text-sm py-8">جارٍ تحميل الرسائل...</p>
+          )}
+          {!isLoading && messages.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-3xl mb-2">💬</p>
+              <p className="text-gray-500 text-sm">لا توجد رسائل بعد.</p>
+              <p className="text-gray-400 text-xs mt-1">ابدأ المحادثة مع المندوب.</p>
+            </div>
+          )}
+          {messages.map((msg: any) => (
+            <div
+              key={msg.id}
+              className={`flex ${msg.sender_type === 'admin' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${
+                  msg.sender_type === 'admin'
+                    ? 'bg-blue-600 text-white rounded-br-sm'
+                    : 'bg-white text-gray-800 border border-gray-100 rounded-bl-sm'
+                }`}
+              >
+                {msg.sender_type === 'driver' && (
+                  <p className="text-[10px] font-bold text-gray-400 mb-0.5">المندوب</p>
+                )}
+                <p>{msg.body}</p>
+                <p className={`text-[10px] mt-0.5 ${msg.sender_type === 'admin' ? 'text-blue-200' : 'text-gray-400'}`}>
+                  {new Date(msg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+            </div>
+          ))}
+          {isFetching && (
+            <p className="text-center text-gray-400 text-xs">جارٍ التحديث...</p>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <div className="bg-white border-t border-gray-100 px-0 py-3">
+          <form
+            className="flex gap-2"
+            onSubmit={e => {
+              e.preventDefault();
+              if (message.trim()) {
+                sendMutation.mutate();
+              }
+            }}
+          >
+            <input
+              type="text"
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              placeholder="اكتب رسالتك..."
+              disabled={sendMutation.isPending}
+              className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
+            />
+            <button
+              type="submit"
+              disabled={!message.trim() || sendMutation.isPending}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-3 rounded-xl transition-colors disabled:opacity-50 flex-shrink-0"
+            >
+              {sendMutation.isPending ? '...' : '📤'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </Modal>
   );
 };
