@@ -1,8 +1,15 @@
+import { useEffect } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/authStore';
 import { useTextScale } from '../utils/textScale';
 import { driverOrdersApi } from '../api/driverOrders';
+import { useMessageNotifications, useManualOrderNotifications, useOfferNotifications } from '../hooks/useNotificationHooks';
+import {
+  setupAudioWarmup,
+  registerServiceWorker,
+  ensureNotificationPermission,
+} from '../utils/notifications';
 
 const NAV_TABS = [
   { label: 'العروض', path: '/driver/home', icon: '🔔' },
@@ -17,6 +24,16 @@ export const DriverLayout = () => {
   const location = useLocation();
   const { scale, cycle, label } = useTextScale();
 
+  // On mount: register SW, warm up AudioContext, and request notification
+  // permission. This runs once for the entire driver session, regardless
+  // of which tab/page the driver lands on first.
+  useEffect(() => {
+    registerServiceWorker();
+    ensureNotificationPermission();
+    const cleanupAudio = setupAudioWarmup();
+    return cleanupAudio;
+  }, []);
+
   // Poll active orders so the bottom-bar badge stays up to date regardless
   // of which driver page is currently open.
   const { data: activeOrders } = useQuery({
@@ -29,6 +46,11 @@ export const DriverLayout = () => {
   // Availability is toggled manually by the driver only — no automatic presence
   // calls or heartbeats happen here.
   const handleLogout = () => logout();
+
+  // Monitor for new offers, manual orders, and messages across all driver tabs
+  useOfferNotifications();
+  useManualOrderNotifications();
+  const { hasUnread: hasUnreadMessages } = useMessageNotifications();
 
 
   return (
@@ -94,6 +116,12 @@ export const DriverLayout = () => {
                   {tab.path === '/driver/active' && activeCount > 0 && (
                     <span className="absolute -top-1 -right-1.5 bg-red-500 text-white font-black leading-none min-w-[17px] h-[17px] rounded-full flex items-center justify-center text-[10px] px-[3px]">
                       {activeCount > 9 ? '9+' : activeCount}
+                    </span>
+                  )}
+                  {tab.path === '/driver/chat' && hasUnreadMessages && (
+                    <span className="absolute -top-1 -right-1.5 min-w-[17px] h-[17px] rounded-full flex items-center justify-center">
+                      <span className="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-60" />
+                      <span className="relative w-3 h-3 bg-blue-500 rounded-full" />
                     </span>
                   )}
                 </span>

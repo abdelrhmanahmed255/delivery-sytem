@@ -2,11 +2,15 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useDarkMode } from '../utils/useDarkMode';
 import { AdminNotificationBell } from './AdminNotificationBell';
+import { useAdminStaleOrderNotifications } from '../hooks/useAdminNotificationHooks';
 
 export const AdminLayout = () => {
   const logout = useAuthStore((state) => state.logout);
   const location = useLocation();
   const { isDark, toggle } = useDarkMode();
+
+  // Monitor for stale orders that have been waiting > 5 mins
+  useAdminStaleOrderNotifications();
 
   const navItems = [
     { name: 'لوحة التحكم', path: '/admin/dashboard', icon: '🏠' },

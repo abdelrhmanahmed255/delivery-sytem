@@ -1,7 +1,13 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { driverOrdersApi } from '../../api/driverOrders';
 import { StatusBadge } from '../../components/StatusBadge';
+import {
+  ensureNotificationPermission,
+  getNotificationPermission,
+  isPushSupported,
+} from '../../utils/notifications';
+
 
 const OrderCard = ({
   order,
@@ -232,16 +238,29 @@ const OrderCard = ({
 
       {order.status === 'in_progress' && (
         <div className="px-4 pb-4">
-          <button
-            onClick={() => {
-              onComplete(order.id);
-            }}
-            disabled={isCompleting}
-            aria-label="تأكيد تسليم الطلب للعميل"
-            className="w-full bg-green-500 active:bg-green-700 text-white font-black py-5 rounded-2xl text-2xl shadow-md transition-transform active:scale-[0.98] disabled:opacity-60"
-          >
-            {isCompleting ? '⏳ جارٍ التأكيد...' : '✅ تم التسليم بنجاح'}
-          </button>
+          {/* For auto distribution: disable button until 1/3 of time has passed. For manual: always enabled */}
+          {order.distribution_mode === 'auto' && timeLeft !== null && timeLeft > (totalSecs * 2 / 3) ? (
+            <div className="space-y-2">
+              <button
+                disabled
+                aria-label="لا يمكن التسليم حتى يمضي 1/3 من الوقت المتاح"
+                className="w-full bg-gray-400 text-white font-black py-5 rounded-2xl text-2xl shadow-md disabled:opacity-60 cursor-not-allowed"
+              >
+                ⏱ انتظر {Math.ceil((timeLeft - totalSecs * 2 / 3) / 60)} دقيقة
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                onComplete(order.id);
+              }}
+              disabled={isCompleting}
+              aria-label="تأكيد تسليم الطلب للعميل"
+              className="w-full bg-green-500 active:bg-green-700 text-white font-black py-5 rounded-2xl text-2xl shadow-md transition-transform active:scale-[0.98] disabled:opacity-60"
+            >
+              {isCompleting ? '⏳ جارٍ التأكيد...' : '✅ تم التسليم بنجاح'}
+            </button>
+          )}
         </div>
       )}
     </article>
@@ -250,12 +269,19 @@ const OrderCard = ({
 
 export const DriverActiveOrders = () => {
   const queryClient = useQueryClient();
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => getNotificationPermission());
+
 
   const { data: orders, isLoading } = useQuery({
     queryKey: ['activeOrders'],
     queryFn: () => driverOrdersApi.activeOrders(),
     refetchInterval: 12000,
   });
+
+  const requestNotifications = async () => {
+    const result = await ensureNotificationPermission();
+    setNotifPerm(result);
+  };
 
   const pickupMutation = useMutation({
     mutationFn: (orderId: number) => driverOrdersApi.pickup(orderId),
@@ -290,6 +316,54 @@ export const DriverActiveOrders = () => {
 
   return (
     <div className="p-4 space-y-4 max-w-lg mx-auto">
+      {/* Enable Android system notifications banner */}
+      {isPushSupported() && notifPerm !== 'granted' && (
+        <div
+          className={`rounded-2xl p-4 border-2 ${
+            notifPerm === 'denied'
+              ? 'bg-orange-50 border-orange-200'
+              : 'bg-blue-50 border-blue-200'
+          }`}
+          role="status"
+        >
+          <div className="flex items-start gap-3">
+            <span className="text-3xl" aria-hidden="true">
+              🔔
+            </span>
+            <div className="flex-1 min-w-0">
+              <p
+                className={`font-black text-base ${
+                  notifPerm === 'denied' ? 'text-orange-800' : 'text-blue-800'
+                }`}
+              >
+                {notifPerm === 'denied'
+                  ? 'تنبيهات الطلبات معطّلة'
+                  : 'فعِّل تنبيهات الطلبات اليدويّة'}
+              </p>
+              <p
+                className={`text-sm mt-1 ${
+                  notifPerm === 'denied'
+                    ? 'text-orange-700'
+                    : 'text-blue-700'
+                }`}
+              >
+                {notifPerm === 'denied'
+                  ? 'لن تحصل على صوت / إشعار / اهتزاز عند وصول طلب يدوي. فعِّلها من إعدادات المتصفح.'
+                  : 'احصل على تنبيه صوتي وإشعار نظام مع اهتزاز قوي عند وصول طلب توصيل يدوي.'}
+              </p>
+              {notifPerm === 'default' && (
+                <button
+                  onClick={requestNotifications}
+                  className="mt-3 bg-blue-600 active:bg-blue-700 text-white font-bold text-sm px-4 py-2 rounded-xl active:scale-95 transition-transform"
+                >
+                  ✅ تفعيل التنبيهات
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-800">توصيلاتي</h2>
         <span className="bg-blue-100 text-blue-700 font-black text-sm px-3 py-1 rounded-full">
