@@ -62,7 +62,7 @@ export const useAdminStaleOrderNotifications = () => {
             // Broadcast a toast to the admin
             broadcastAdminAlert(
               '⚠️ طلب متأخر!',
-              `الطلب رقم ${order.customer?.full_name || order.id} ينتظر منذ أكثر من 5 دقائق ولم يتم تعيين مندوب له بعد.`,
+              `الطلب  ${order.customer?.full_name || order.id} ينتظر منذ أكثر من 5 دقائق ولم يتم تعيين مندوب له بعد.`,
               'admin-alert'
             );
           }
