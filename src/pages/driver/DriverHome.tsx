@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { driversApi } from '../../api/drivers';
 import { apiClient } from '../../api/client';
 import {
@@ -8,11 +9,9 @@ import {
   isPushSupported,
 } from '../../utils/notifications';
 
-
-
 export const DriverHome = () => {
   const queryClient = useQueryClient();
-  const [openedOffer, setOpenedOffer] = useState<any>(null);
+  const navigate = useNavigate();
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => getNotificationPermission());
   // Tracks availability locally so that backend-side automatic changes (e.g.
   // the server marking the driver unavailable after order assignment) do NOT
@@ -72,17 +71,21 @@ export const DriverHome = () => {
     },
   });
 
-  const openOfferMutation = useMutation({
-    mutationFn: (id: number) => apiClient.post(`/driver/orders/offers/${id}/open`).then(r => r.data),
-    onSuccess: (data) => setOpenedOffer(data),
-  });
-
-  const acceptOfferMutation = useMutation({
-    mutationFn: (id: number) => apiClient.post(`/driver/orders/offers/${id}/accept`),
+  const seeAndAcceptMutation = useMutation({
+    mutationFn: async (id: number) => {
+      // Backend might require the offer to be 'opened' before 'accepted', so we call both
+      try {
+        await apiClient.post(`/driver/orders/offers/${id}/open`);
+      } catch (err) {
+        // Ignore errors on open, attempt to accept anyway
+      }
+      return apiClient.post(`/driver/orders/offers/${id}/accept`);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['currentOffer'] });
       queryClient.invalidateQueries({ queryKey: ['activeOrders'] });
-      setOpenedOffer(null);
+      // Redirect directly to active orders so the driver can see the full details
+      navigate('/driver/active');
     },
   });
 
@@ -90,16 +93,11 @@ export const DriverHome = () => {
     mutationFn: (id: number) => apiClient.post(`/driver/orders/offers/${id}/ignore`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['currentOffer'] });
-      setOpenedOffer(null);
     },
   });
 
-  // Use driver-controlled local state; fall back to server value only before
-  // the first load so the toggle is never flipped by background polling.
   const isAvailable = localAvailable ?? me?.is_available;
   const isRestricted = me?.restricted_until && new Date(me.restricted_until) > new Date();
-
-  const offerOrder = openedOffer?.order ?? openedOffer;
 
   const requestNotifications = async () => {
     const result = await ensureNotificationPermission();
@@ -199,82 +197,8 @@ export const DriverHome = () => {
         </div>
       </button>
 
-      {/* ── Opened offer details card ───────────────────── */}
-      {openedOffer && offerOrder && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-          {/* Price banner */}
-          <div className="bg-green-500 text-white text-center py-5 px-4">
-            <p className="text-sm font-semibold opacity-80 mb-1">💰 المبلغ</p>
-            <p className="text-6xl font-black leading-none">{offerOrder.price}</p>
-            <p className="text-xl font-bold mt-1">جنيه مصري</p>
-            <p className="text-sm opacity-70 mt-2">⏱ {offerOrder.delivery_eta_minutes} دقيقة وقت التوصيل</p>
-          </div>
-
-          <div className="p-4 space-y-3">
-            {/* Pickup */}
-            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-              <p className="text-sm font-bold text-blue-700 mb-1">📍 نقطة الاستلام</p>
-              <p className="text-lg text-gray-900 font-bold leading-snug break-words whitespace-pre-wrap">{offerOrder.pickup_address}</p>
-              {offerOrder.pickup_contact && (
-                <p className="text-base text-gray-600 mt-1">جهة الاتصال: {offerOrder.pickup_contact}</p>
-              )}
-              <a
-                href={`https://maps.google.com/maps?q=${encodeURIComponent(offerOrder.pickup_address)}`}
-                target="_blank" rel="noopener noreferrer"
-                aria-label={`فتح خريطة لعنوان الاستلام: ${offerOrder.pickup_address}`}
-                className="inline-flex items-center gap-2 mt-3 bg-blue-600 text-white text-base font-bold px-4 py-2.5 rounded-xl active:scale-95"
-              >
-                <span aria-hidden="true">🗺️</span> افتح الخريطة
-              </a>
-            </div>
-
-            {/* Delivery area */}
-            {offerOrder.customer?.address && (
-              <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-                <p className="text-sm font-bold text-emerald-700 mb-1">🏠 منطقة التوصيل</p>
-                <p className="text-lg text-gray-900 font-bold break-words whitespace-pre-wrap leading-snug">{offerOrder.customer.address}</p>
-                <a
-                  href={`https://maps.google.com/maps?q=${encodeURIComponent(offerOrder.customer.address)}`}
-                  target="_blank" rel="noopener noreferrer"
-                  aria-label={`فتح خريطة لمنطقة التوصيل: ${offerOrder.customer.address}`}
-                  className="inline-flex items-center gap-2 mt-3 bg-emerald-600 text-white text-base font-bold px-4 py-2.5 rounded-xl active:scale-95"
-                >
-                  <span aria-hidden="true">🗺️</span> افتح الخريطة
-                </a>
-              </div>
-            )}
-
-            {/* Package */}
-            {offerOrder.package_description && (
-              <div className="bg-orange-50 border border-orange-100 rounded-2xl p-4">
-                <p className="text-sm font-bold text-orange-700 mb-1">📦 محتوى الطرد</p>
-                <p className="text-lg text-gray-800 break-words whitespace-pre-wrap leading-relaxed">{offerOrder.package_description}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Action buttons */}
-          <div className="p-4 pt-0 space-y-2">
-            <button
-              onClick={() => acceptOfferMutation.mutate(openedOffer.id)}
-              disabled={acceptOfferMutation.isPending}
-              className="w-full bg-green-500 active:bg-green-700 text-white font-black py-5 rounded-2xl text-xl shadow-md transition-transform active:scale-[0.98] disabled:opacity-60"
-            >
-              {acceptOfferMutation.isPending ? '⏳ جارٍ القبول...' : '✅ قبول العرض'}
-            </button>
-            <button
-              onClick={() => ignoreOfferMutation.mutate(openedOffer.id)}
-              disabled={ignoreOfferMutation.isPending}
-              className="w-full text-red-500 font-bold py-3 text-lg active:opacity-60"
-            >
-              {ignoreOfferMutation.isPending ? '...' : '✕ رفض العرض'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ── New offer notification card (not yet opened) ─ */}
-      {offerSummary && !openedOffer && (
+      {offerSummary && (
         <div className="bg-blue-600 text-white rounded-2xl overflow-hidden shadow-md">
           <div className="flex items-center gap-4 p-4">
             <div className="relative w-14 h-14 flex-shrink-0">
@@ -290,11 +214,11 @@ export const DriverHome = () => {
           </div>
           <div className="px-4 pb-4 space-y-2">
             <button
-              onClick={() => pendingOfferId && openOfferMutation.mutate(pendingOfferId)}
-              disabled={openOfferMutation.isPending || !pendingOfferId}
+              onClick={() => pendingOfferId && seeAndAcceptMutation.mutate(pendingOfferId)}
+              disabled={seeAndAcceptMutation.isPending || !pendingOfferId}
               className="w-full bg-white text-blue-700 font-black py-4 rounded-2xl text-lg shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
             >
-              {openOfferMutation.isPending ? 'جارٍ الفتح...' : '👁 اعرض التفاصيل والسعر'}
+              {seeAndAcceptMutation.isPending ? 'جارٍ القبول...' : '👁✅ رؤية وقبول الطلب'}
             </button>
             <button
               onClick={() => pendingOfferId && ignoreOfferMutation.mutate(pendingOfferId)}
@@ -308,7 +232,7 @@ export const DriverHome = () => {
       )}
 
       {/* ── Standby / no offer ──────────────────────────── */}
-      {!offerSummary && !openedOffer && (
+      {!offerSummary && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 flex flex-col items-center text-center space-y-5">
           {isAvailable ? (
             <>

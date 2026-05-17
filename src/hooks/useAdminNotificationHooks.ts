@@ -54,15 +54,15 @@ export const useAdminStaleOrderNotifications = () => {
         if (['cancelled', 'completed', 'expired'].includes(order.status)) return;
 
         const createdAt = order.created_at ? new Date(order.created_at).getTime() : 0;
-        
+
         if (createdAt > 0 && (now - createdAt) >= FIVE_MINUTES_MS) {
           if (!previousAlertedOrdersRef.current.has(order.id)) {
             previousAlertedOrdersRef.current.add(order.id);
-            
+
             // Broadcast a toast to the admin
             broadcastAdminAlert(
               '⚠️ طلب متأخر!',
-              `الطلب رقم ${order.code || order.id} ينتظر منذ أكثر من 5 دقائق ولم يتم تعيين مندوب له بعد.`,
+              `الطلب رقم ${order.customer?.full_name || order.id} ينتظر منذ أكثر من 5 دقائق ولم يتم تعيين مندوب له بعد.`,
               'admin-alert'
             );
           }

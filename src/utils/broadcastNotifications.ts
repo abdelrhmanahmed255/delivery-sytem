@@ -3,7 +3,7 @@
  * Allows all tabs to receive and display notifications for manual orders and messages
  */
 
-export type NotificationEventType = 'manual-order' | 'message' | 'dismiss';
+export type NotificationEventType = 'manual-order' | 'message' | 'dismiss' | 'admin-alert';
 
 export interface NotificationBroadcast {
   type: NotificationEventType;
