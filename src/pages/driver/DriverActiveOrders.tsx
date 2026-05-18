@@ -35,7 +35,7 @@ const OrderCard = ({
     return null;
   });
   const autoPickedUpRef = useRef(false);
-  const autoCompletedRef = useRef(false);
+
   const onPickupRef = useRef(onPickup);
   const onCompleteRef = useRef(onComplete);
   useEffect(() => { onPickupRef.current = onPickup; });
@@ -64,7 +64,7 @@ const OrderCard = ({
     // Only run timer if status is in_progress
     if (order.status !== 'in_progress') {
       setTimeLeft(null);
-      autoCompletedRef.current = false;
+
       return;
     }
 
@@ -92,11 +92,6 @@ const OrderCard = ({
       const elapsed = Math.floor((Date.now() - pickupTs) / 1000);
       const remaining = Math.max(0, totalSecs - elapsed);
       setTimeLeft(remaining);
-      
-      if (remaining === 0 && !autoCompletedRef.current) {
-        autoCompletedRef.current = true;
-        onCompleteRef.current(order.id);
-      }
     };
 
     tick();
@@ -150,7 +145,7 @@ const OrderCard = ({
             <p className="text-sm text-gray-500 mt-1">من أصل {Math.ceil(totalSecs / 60)} دقيقة</p>
             {timeLeft === 0 && (
               <p className="text-base text-red-600 font-black mt-2">
-                ⚠️ انتهى الوقت — جارٍ إنهاء الطلب تلقائياً
+                ⚠️ انتهى الوقت — يرجى تسليم الطلب
               </p>
             )}
           </div>
